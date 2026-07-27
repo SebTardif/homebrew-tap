@@ -1,7 +1,7 @@
 class Gitcrawl < Formula
   desc "Local GitHub issue and PR archive with gh-compatible caching"
   homepage "https://github.com/openclaw/gitcrawl"
-  version "0.8.5"
+  version "0.8.6"
   license "MIT"
 
   head "https://github.com/openclaw/gitcrawl.git", branch: "main"
@@ -9,20 +9,20 @@ class Gitcrawl < Formula
   on_macos do
     if Hardware::CPU.arm?
       url "https://github.com/openclaw/gitcrawl/releases/download/v#{version}/gitcrawl_#{version}_darwin_arm64.tar.gz"
-      sha256 "992e0d3a110353654deb7589b6602433f585018dfbc6eca23f81d66450ae41f4"
+      sha256 "c83fb9735430491a7a2d88ee655bbfb548e9fdb89e9d3801910bd857c42c21ae"
     else
       url "https://github.com/openclaw/gitcrawl/releases/download/v#{version}/gitcrawl_#{version}_darwin_amd64.tar.gz"
-      sha256 "55ae4f877bb69ec915adbbd46f9399c2ce695a709fabaa6a1468c772c29161f4"
+      sha256 "a246d30b2a197a757b49af42e9acbc7b30863d622941581e9c88324538eef9ad"
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
       url "https://github.com/openclaw/gitcrawl/releases/download/v#{version}/gitcrawl_#{version}_linux_arm64.tar.gz"
-      sha256 "f229ce34bb7fec5f73f3ce12f1415380792b0626c9329bb3d3721b41e2698df1"
+      sha256 "ea9c49e624b4e0978f115ee0446f7e758c20073ae6e941336caf42f40a8d5bef"
     else
       url "https://github.com/openclaw/gitcrawl/releases/download/v#{version}/gitcrawl_#{version}_linux_amd64.tar.gz"
-      sha256 "8c3ee8c0585c48b140ba300701667746966b46ebfcf9e8ada3b5b8713869db53"
+      sha256 "8c07f721c54fd7a4a45d902ef534cd70fb3b92d345341737db8d6a31c52d9d7a"
     end
   end
 

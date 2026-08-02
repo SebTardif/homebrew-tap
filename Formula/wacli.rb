@@ -1,7 +1,7 @@
 class Wacli < Formula
   desc "WhatsApp CLI built on whatsmeow"
   homepage "https://github.com/openclaw/wacli"
-  version "0.15.0"
+  version "0.15.1"
   license "MIT"
   version_scheme 1
   head "https://github.com/openclaw/wacli.git", branch: "main"
@@ -10,24 +10,24 @@ class Wacli < Formula
 
   on_macos do
     if Hardware::CPU.arm?
-      url "https://github.com/openclaw/wacli/releases/download/v0.15.0/wacli_0.15.0_darwin_arm64.tar.gz"
-      sha256 "2b54f33d246e913a5c33525b4fc895a345363c2dcc673c70fa5f19cffb15d17d"
+      url "https://github.com/openclaw/wacli/releases/download/v0.15.1/wacli_0.15.1_darwin_arm64.tar.gz"
+      sha256 "03757f45cb2628cd5bdeda6149bd2ab171394ad274ae29d400259241bd9eab19"
     end
 
     if Hardware::CPU.intel?
-      url "https://github.com/openclaw/wacli/releases/download/v0.15.0/wacli_0.15.0_darwin_amd64.tar.gz"
-      sha256 "f778377aa1ef317335284166d5832b492e2a99aae107ae475aaf54c0940ce1a7"
+      url "https://github.com/openclaw/wacli/releases/download/v0.15.1/wacli_0.15.1_darwin_amd64.tar.gz"
+      sha256 "2f5a77ebe5f8e597bf6946dd1edee9152bd10a34de8f9ef7879ede6c564b2aa4"
     end
   end
   on_linux do
     if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
-      url "https://github.com/openclaw/wacli/releases/download/v0.15.0/wacli_0.15.0_linux_arm64.tar.gz"
-      sha256 "6f6e523b6c14f7e413af436f8066a1370573d29a858be06670c12350fa27c7ec"
+      url "https://github.com/openclaw/wacli/releases/download/v0.15.1/wacli_0.15.1_linux_arm64.tar.gz"
+      sha256 "f307e5adada6ebaa82585c8e789ef1e2e60690925032a31cfb063e06618f7765"
     end
 
     if Hardware::CPU.intel? && Hardware::CPU.is_64_bit?
-      url "https://github.com/openclaw/wacli/releases/download/v0.15.0/wacli_0.15.0_linux_amd64.tar.gz"
-      sha256 "e01903177e3e4c93dc962e70dcc07bc3dee3a4b282a5e3096f8a5228516e7bb7"
+      url "https://github.com/openclaw/wacli/releases/download/v0.15.1/wacli_0.15.1_linux_amd64.tar.gz"
+      sha256 "6f3082834419174f7629727625b326b439a91521395fb0ea9bcd528471edddea"
     end
   end
 

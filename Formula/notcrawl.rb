@@ -1,7 +1,6 @@
 class Notcrawl < Formula
   desc "Local-first Notion crawler into SQLite and normalized Markdown"
   homepage "https://github.com/openclaw/notcrawl"
-  version "0.5.6"
   license "MIT"
 
   on_macos do

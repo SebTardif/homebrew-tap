@@ -1,26 +1,26 @@
 class Graincrawl < Formula
   desc "Local-first Granola crawler into SQLite and Markdown"
   homepage "https://github.com/openclaw/graincrawl"
-  version "0.3.6"
+  version "0.3.7"
   license "MIT"
 
   on_macos do
     if Hardware::CPU.arm?
-      url "https://github.com/openclaw/graincrawl/releases/download/v0.3.6/graincrawl_0.3.6_darwin_arm64.tar.gz"
-      sha256 "53cf602478242bae8840de994d57166df5c2ca830688e6df76e8e094b0efc72c"
+      url "https://github.com/openclaw/graincrawl/releases/download/v0.3.7/graincrawl_0.3.7_darwin_arm64.tar.gz"
+      sha256 "885663cefaa656a61e14912f80b396315467ba20f006974c525ed8b3a8617321"
     else
-      url "https://github.com/openclaw/graincrawl/releases/download/v0.3.6/graincrawl_0.3.6_darwin_amd64.tar.gz"
-      sha256 "e929ab664d7700c07b0160735092625c90ed3fc7ca0fe971cdd009bc2002e67c"
+      url "https://github.com/openclaw/graincrawl/releases/download/v0.3.7/graincrawl_0.3.7_darwin_amd64.tar.gz"
+      sha256 "1cafd2baa81a9daa293dfab26e492ccae02fa00e1ced6d7bc7eddfd898fba6b9"
     end
   end
 
   on_linux do
     if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
-      url "https://github.com/openclaw/graincrawl/releases/download/v0.3.6/graincrawl_0.3.6_linux_arm64.tar.gz"
-      sha256 "255e93e0d8f2f8f41cc1fa7f84b6143f600739dcae2cf3a7278e69943aa2d0be"
+      url "https://github.com/openclaw/graincrawl/releases/download/v0.3.7/graincrawl_0.3.7_linux_arm64.tar.gz"
+      sha256 "d0e8409b1a200a16472df6f1263df8a97ffb9accd8ba281d4590845ac27434e0"
     else
-      url "https://github.com/openclaw/graincrawl/releases/download/v0.3.6/graincrawl_0.3.6_linux_amd64.tar.gz"
-      sha256 "5d1cc9dfbca9f18887978b11578e2b8af2ec5bf339699a4d2bc278af88a7f24c"
+      url "https://github.com/openclaw/graincrawl/releases/download/v0.3.7/graincrawl_0.3.7_linux_amd64.tar.gz"
+      sha256 "63d490109583908839f9e4aa01f05e97c3895b0b2d37c08d14e9679bb2ff9445"
     end
   end
 

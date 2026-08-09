@@ -63,10 +63,21 @@ brew uninstall --cask --zap openclaw/tap/<name>
 
 ## Maintainers
 
-The `Update Formula` workflow accepts a Homebrew formula token, a semantic release tag, and a
+Formula updates have two paths. Source-repository release workflows dispatch `Update Formula` for
+immediate updates. That workflow accepts a Homebrew formula token, a semantic release tag, and a
 GitHub repository in `owner/repo` form. Optional artifact inputs must resolve to HTTPS release
-assets and may use only the placeholders documented by the workflow. Pull requests and updates
-to `main` run the updater tests and validate every formula's Ruby syntax.
+assets and may use only the placeholders documented by the workflow.
+
+`Reconcile Formulae` is the self-healing fallback. Every three hours it derives each source
+repository from the formula's GitHub `homepage`, compares the formula with that repository's latest
+stable published release, and runs the same updater and checksum-download logic when the release is
+newer. It never downgrades, skips drafts and prereleases, and makes no commit when every formula is
+current. Manual reconciles default to dry-run and can target one formula. The reconciler reads public
+release metadata and pushes with this tap's own `GITHUB_TOKEN`; it needs no cross-repository token or
+other external credential. The dispatch path remains the preferred low-latency path.
+
+Pull requests and updates to `main` run the updater and reconciler tests and validate every formula's
+Ruby syntax.
 
 Fleet release workflows use the optional `assets` JSON contract: exactly one `name` and `sha256`
 for each Darwin/Linux amd64/arm64 target. The updater renders those names and hashes verbatim,

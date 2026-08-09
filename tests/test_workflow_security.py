@@ -11,6 +11,7 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 UPDATE_WORKFLOW = ROOT / ".github" / "workflows" / "update-formula.yml"
+RECONCILE_WORKFLOW = ROOT / ".github" / "workflows" / "reconcile-formulae.yml"
 CHECKOUT_SHA = "9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
 
 
@@ -73,6 +74,26 @@ class WorkflowSecurityTest(unittest.TestCase):
         self.assertIn("ref: ${{ github.sha }}", text)
         setup = named_step_run(text, "Setup Git")
         self.assertIn('git checkout -B "$DEFAULT_BRANCH" "$GITHUB_SHA"', setup)
+
+    def test_reconciler_is_bound_to_protected_default_branch_and_own_token(self) -> None:
+        text = RECONCILE_WORKFLOW.read_text()
+        self.assertIn("github.ref_protected == true", text)
+        self.assertIn(
+            "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)",
+            text,
+        )
+        self.assertIn(
+            "endsWith(github.workflow_ref, format('@refs/heads/{0}', github.event.repository.default_branch))",
+            text,
+        )
+        self.assertIn("permissions:\n  contents: write", text)
+        self.assertIn("GH_TOKEN: ${{ github.token }}", text)
+        self.assertNotIn("TAP_TOKEN", text)
+        self.assertIn("persist-credentials: false", text)
+        self.assertIn("ref: ${{ github.sha }}", text)
+        self.assertIn('git diff --exit-code', named_step_run(text, "Commit and push"))
+        for block in run_blocks(text):
+            self.assertNotIn("${{ inputs.", block)
 
     def test_verified_handoff_has_exact_inputs_run_name_and_commit_trailers(self) -> None:
         text = UPDATE_WORKFLOW.read_text()

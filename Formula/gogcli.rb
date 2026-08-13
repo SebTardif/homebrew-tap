@@ -6,20 +6,20 @@ class Gogcli < Formula
 
   on_macos do
     if Hardware::CPU.arm?
-      url "https://github.com/openclaw/gogcli/releases/download/v#{version}/gogcli_#{version}_darwin_arm64.tar.gz"
+      url "https://github.com/openclaw/gogcli/releases/download/v0.36.0/gogcli_0.36.0_darwin_arm64.tar.gz"
       sha256 "5cb5b5210879769bc6a02bd9cf39ed1b0de3f0713b397ecbddefe95dd2be618b"
     else
-      url "https://github.com/openclaw/gogcli/releases/download/v#{version}/gogcli_#{version}_darwin_amd64.tar.gz"
+      url "https://github.com/openclaw/gogcli/releases/download/v0.36.0/gogcli_0.36.0_darwin_amd64.tar.gz"
       sha256 "7252cfc0a63d239912d0d57ca5f51e31ca58472b506834237e148704387902df"
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
-      url "https://github.com/openclaw/gogcli/releases/download/v#{version}/gogcli_#{version}_linux_arm64.tar.gz"
+      url "https://github.com/openclaw/gogcli/releases/download/v0.36.0/gogcli_0.36.0_linux_arm64.tar.gz"
       sha256 "f68e3c35c9364dea5a4e515d13a23ab30ded46401c90d89e2953dca395d7fe42"
     else
-      url "https://github.com/openclaw/gogcli/releases/download/v#{version}/gogcli_#{version}_linux_amd64.tar.gz"
+      url "https://github.com/openclaw/gogcli/releases/download/v0.36.0/gogcli_0.36.0_linux_amd64.tar.gz"
       sha256 "b290fcfe907789a1efb685a9336e2a6c7f9598c3c00aada8d6c437eebc86c891"
     end
   end

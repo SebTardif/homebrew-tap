@@ -5,7 +5,6 @@
 class Crabbox < Formula
   desc "Remote software testing and execution"
   homepage "https://github.com/openclaw/crabbox"
-  version "0.43.0"
   license "MIT"
 
   on_macos do

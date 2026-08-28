@@ -9,8 +9,8 @@ class Crabbox < Formula
 
   on_macos do
     if Hardware::CPU.intel?
-      url "https://github.com/openclaw/crabbox/releases/download/v0.46.0/crabbox_0.46.0_darwin_amd64.tar.gz"
-      sha256 "18035770b5b654114fa95d2e468268b13c69862137cc1f083bd674bbb2bf83bb"
+      url "https://github.com/openclaw/crabbox/releases/download/v0.47.0/crabbox_0.47.0_darwin_amd64.tar.gz"
+      sha256 "642995363f7d6c367859e77f80eb66468ef2ed380d1e7ea4ae737f7deeb986d4"
 
       define_method(:install) do
         bin.install "crabbox"
@@ -18,8 +18,8 @@ class Crabbox < Formula
       end
     end
     if Hardware::CPU.arm?
-      url "https://github.com/openclaw/crabbox/releases/download/v0.46.0/crabbox_0.46.0_darwin_arm64.tar.gz"
-      sha256 "2216da0acbcc6e822ee341ec313aaab58875db951fa1daf0d13dd710ebfba9b8"
+      url "https://github.com/openclaw/crabbox/releases/download/v0.47.0/crabbox_0.47.0_darwin_arm64.tar.gz"
+      sha256 "ef1567083f6bd0d01b2539efdd69ccd205c2642e7d9eefb073d58052e8a7bb91"
 
       define_method(:install) do
         bin.install "crabbox"
@@ -30,16 +30,16 @@ class Crabbox < Formula
 
   on_linux do
     if Hardware::CPU.intel? && Hardware::CPU.is_64_bit?
-      url "https://github.com/openclaw/crabbox/releases/download/v0.46.0/crabbox_0.46.0_linux_amd64.tar.gz"
-      sha256 "6a9341e810307356361dbed4c4b84be28a036b5cc291af1566d2ccd376570d90"
+      url "https://github.com/openclaw/crabbox/releases/download/v0.47.0/crabbox_0.47.0_linux_amd64.tar.gz"
+      sha256 "e513ba473be4eaaadf16f88fe030a03e6a11c0b49a088941fcccdbf3a09247ad"
       define_method(:install) do
         bin.install "crabbox"
         bin.install "crabbox-apple-vm-helper" if OS.mac? && Hardware::CPU.arm?
       end
     end
     if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
-      url "https://github.com/openclaw/crabbox/releases/download/v0.46.0/crabbox_0.46.0_linux_arm64.tar.gz"
-      sha256 "d95730856cd3909dab0703ec024e3017a094fff2a065516782b47019fec9533d"
+      url "https://github.com/openclaw/crabbox/releases/download/v0.47.0/crabbox_0.47.0_linux_arm64.tar.gz"
+      sha256 "94a388cd7301c7ba1d7e42d8c55d68c6b9dd55025e79cf247c58d659aa5039d4"
       define_method(:install) do
         bin.install "crabbox"
         bin.install "crabbox-apple-vm-helper" if OS.mac? && Hardware::CPU.arm?

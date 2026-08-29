@@ -29,7 +29,7 @@ brew install --cask openclaw/tap/<name>
 - `crabfleet` — Fleet management CLI for Crabbox workers
 - `crawlbar` — macOS menu bar control plane for local-first crawler CLIs
 - `discrawl` — Mirror Discord into SQLite and search server history locally
-- `gitcrawl` — Local GitHub issue and PR archive with gh-compatible caching
+- `gitcrawl` — Local GitHub issue and PR archive, search, and clustering
 - `gogcli` — Google CLI for Gmail, Calendar, Drive, Docs, Sheets, and more
 - `goplaces` — Modern Go client + CLI for the Google Places API (New)
 - `graincrawl` — Local-first Granola crawler into SQLite and Markdown
@@ -67,6 +67,11 @@ Formula updates have two paths. Source-repository release workflows dispatch `Up
 immediate updates. That workflow accepts a Homebrew formula token, a semantic release tag, and a
 GitHub repository in `owner/repo` form. Optional artifact inputs must resolve to HTTPS release
 assets and may use only the placeholders documented by the workflow.
+
+Existing `Formula/*.rb` files own each tool's caveats and install instructions. The updater
+preserves that content while changing release metadata, so maintain it here rather than in an
+upstream release workflow. For Gitcrawl, see the [configuration reference](https://gitcrawl.sh/configuration/)
+and [gh shim migration to Octopool](https://gitcrawl.sh/gh-shim/).
 
 `Reconcile Formulae` is the self-healing fallback. Every three hours it derives each source
 repository from the formula's GitHub `homepage`, compares the formula with that repository's latest

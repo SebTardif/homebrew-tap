@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import tempfile
 import unittest
 from unittest import mock
@@ -18,6 +19,140 @@ SPEC.loader.exec_module(update_formula)
 
 
 class UpdateFormulaTest(unittest.TestCase):
+    def test_gitcrawl_description_matches_archive_search_and_clustering(self) -> None:
+        formula = (ROOT / "Formula" / "gitcrawl.rb").read_text()
+        description = re.search(r'^  desc "([^"]+)"$', formula, re.MULTILINE)
+        self.assertIsNotNone(description)
+        assert description is not None
+        text = description.group(1)
+        for keyword in ("local", "archive", "search", "cluster"):
+            with self.subTest(keyword=keyword):
+                self.assertIn(keyword, text.lower())
+        self.assertNotIn("gh-compatible", text.lower())
+        self.assertIn(f"- `gitcrawl` — {text}\n", (ROOT / "README.md").read_text())
+
+    def test_gitcrawl_caveats_document_platform_defaults_and_shim_ownership(self) -> None:
+        formula = (ROOT / "Formula" / "gitcrawl.rb").read_text()
+        caveats = formula.split("  def caveats\n", 1)[1].split("    EOS", 1)[0]
+        platform_paths = {
+            "macOS": {
+                "~/Library/Application Support/gitcrawl/": ("config", "database", "vectors", "logs"),
+                "~/Library/Caches/gitcrawl/": ("cache",),
+            },
+            "Linux": {
+                "${XDG_CONFIG_HOME:-~/.config}/gitcrawl/": ("config",),
+                "${XDG_DATA_HOME:-~/.local/share}/gitcrawl/": ("database", "vectors"),
+                "${XDG_CACHE_HOME:-~/.cache}/gitcrawl/": ("cache",),
+                "${XDG_STATE_HOME:-~/.local/state}/gitcrawl/": ("logs",),
+            },
+        }
+        for platform, paths in platform_paths.items():
+            with self.subTest(platform=platform):
+                section = re.search(rf"{platform}:\n((?:[ \t]{{8,}}[^\n]+\n)+)", caveats)
+                self.assertIsNotNone(section)
+                assert section is not None
+                for path, purposes in paths.items():
+                    line = next((line for line in section.group(1).splitlines() if path in line), "")
+                    self.assertTrue(line, f"missing {platform} default: {path}")
+                    for purpose in purposes:
+                        self.assertIn(purpose, line)
+
+        normalized = " ".join(caveats.lower().split())
+        for pattern in (
+            r"fresh.*defaults",
+            r"absolute xdg overrides.*macos",
+            r"legacy paths.*reused",
+            r"explicit.*configured paths.*differ",
+            r"gitcrawl doctor --json.*active config.*database paths",
+            r"gh compatibility shim.*moved to octopool",
+            r"keep.*existing gh/octopool setup",
+            r"do not symlink gitcrawl as gh",
+        ):
+            with self.subTest(pattern=pattern):
+                self.assertRegex(normalized, pattern)
+        for link in ("https://gitcrawl.sh/configuration/", "https://gitcrawl.sh/gh-shim/"):
+            with self.subTest(link=link):
+                self.assertIn(link, caveats)
+        for obsolete in ("GITCRAWL_GH_PATH", "gitcrawl-gh", "symlink the same binary", "ln -s"):
+            with self.subTest(obsolete=obsolete):
+                self.assertNotIn(obsolete, caveats)
+        doctor_guidance = re.search(r"gitcrawl doctor --json[^.]*\.", normalized)
+        self.assertIsNotNone(doctor_guidance)
+        assert doctor_guidance is not None
+        self.assertNotRegex(doctor_guidance.group(0), r"cache|vector|log")
+
+    def test_gitcrawl_release_updates_preserve_maintained_formula_content(self) -> None:
+        formula = (ROOT / "Formula" / "gitcrawl.rb").read_text()
+        version_match = re.search(r'^  version "(\d+)\.(\d+)\.(\d+)"$', formula, re.MULTILINE)
+        self.assertIsNotNone(version_match)
+        assert version_match is not None
+        major, minor, patch = version_match.groups()
+        version = f"{major}.{minor}.{int(patch) + 1}"
+        hashes = {target: str(index) * 64 for index, target in enumerate(update_formula.RELEASE_TARGETS, 1)}
+        old_pairs = {(match.group("url"), match.group("sha")) for match in update_formula.iter_url_sha_pairs(formula)}
+        metadata = r'(?m)^\s*(?:version|url|sha256) "[^"\n]+"$'
+
+        for mode in ("explicit-assets", "legacy-template", "verified-hashes"):
+            with self.subTest(mode=mode):
+                template = "{formula}_{version}_{target}.tar.gz"
+                if mode == "explicit-assets":
+                    template = "{formula}_{version}_custom_{target}.tar.gz"
+                assets = {
+                    target: {"name": template.format(formula="gitcrawl", version=version, target=target), "sha256": digest}
+                    for target, digest in hashes.items()
+                }
+                expected = {
+                    f"https://github.com/openclaw/gitcrawl/releases/download/v{version}/{asset['name']}": asset["sha256"]
+                    for asset in assets.values()
+                }
+                arguments = ["--formula", "gitcrawl", "--tag", f"v{version}", "--repository", "openclaw/gitcrawl"]
+                if mode == "explicit-assets":
+                    arguments += ["--assets-json", json.dumps(assets)]
+                else:
+                    arguments += ["--artifact-template", template]
+                if mode == "verified-hashes":
+                    for target, digest in hashes.items():
+                        arguments += [f"--{target.replace('_', '-')}-sha256", digest]
+                    arguments += [
+                        "--source-tag-object", "b" * 40,
+                        "--source-tag-commit", "a" * 40,
+                        "--request-id", "gitcrawl-caveats-regression",
+                    ]
+
+                previous_directory = pathlib.Path.cwd()
+                with tempfile.TemporaryDirectory() as directory:
+                    root = pathlib.Path(directory)
+                    (root / "Formula").mkdir()
+                    path = root / "Formula" / "gitcrawl.rb"
+                    path.write_text(formula)
+                    os.chdir(root)
+                    try:
+                        with (
+                            mock.patch.object(update_formula, "sha256", side_effect=expected.__getitem__) as download,
+                            mock.patch.object(update_formula, "verify_remote_source_tag") as verify_tag,
+                        ):
+                            self.assertEqual(update_formula.main(arguments), 0)
+                    finally:
+                        os.chdir(previous_directory)
+                    updated = path.read_text()
+
+                if mode == "verified-hashes":
+                    download.assert_not_called()
+                    verify_tag.assert_called_once_with("openclaw/gitcrawl", f"v{version}", "b" * 40, "a" * 40)
+                else:
+                    verify_tag.assert_not_called()
+                    self.assertCountEqual([call.args[0] for call in download.call_args_list], expected)
+                pairs = [
+                    (match.group("url").replace("#{version}", version), match.group("sha"))
+                    for match in update_formula.iter_url_sha_pairs(updated)
+                ]
+                self.assertCountEqual(pairs, expected.items())
+                self.assertTrue(set(pairs).isdisjoint(old_pairs))
+                self.assertIn(f'  version "{version}"', updated)
+                self.assertNotIn(version_match.group(0), updated)
+                # Only release metadata may change: preserve desc, install, caveats, and test verbatim.
+                self.assertEqual(re.sub(metadata, "", updated), re.sub(metadata, "", formula))
+
     def test_validates_dispatch_identifiers(self) -> None:
         self.assertEqual(update_formula.validate_tap_token("gogcli", "formula"), "gogcli")
         self.assertEqual(update_formula.validate_repository("openclaw/gogcli"), "openclaw/gogcli")

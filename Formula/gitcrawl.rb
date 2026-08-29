@@ -1,5 +1,5 @@
 class Gitcrawl < Formula
-  desc "Local GitHub issue and PR archive with gh-compatible caching"
+  desc "Local GitHub issue and PR archive, search, and clustering"
   homepage "https://github.com/openclaw/gitcrawl"
   version "0.9.3"
   license "MIT"
@@ -39,12 +39,24 @@ class Gitcrawl < Formula
 
   def caveats
     <<~EOS
-      gitcrawl stores local state under:
-        ~/.config/gitcrawl/
-        ~/.cache/gitcrawl/
+      gitcrawl fresh defaults:
+      macOS:
+        ~/Library/Application Support/gitcrawl/ (config, database, vectors, logs)
+        ~/Library/Caches/gitcrawl/ (cache)
+      Linux:
+        ${XDG_CONFIG_HOME:-~/.config}/gitcrawl/ (config)
+        ${XDG_DATA_HOME:-~/.local/share}/gitcrawl/ (database, vectors)
+        ${XDG_CACHE_HOME:-~/.cache}/gitcrawl/ (cache)
+        ${XDG_STATE_HOME:-~/.local/state}/gitcrawl/ (logs)
 
-      To use the GitHub CLI shim, symlink the same binary as gitcrawl-gh or gh
-      and set GITCRAWL_GH_PATH to the real GitHub CLI.
+      Absolute XDG overrides are honored on macOS too. Existing legacy paths
+      may still be reused; explicit or configured paths can differ.
+      See https://gitcrawl.sh/configuration/ for details.
+      Run gitcrawl doctor --json for active config and database paths.
+
+      Gitcrawl's gh compatibility shim has moved to Octopool.
+      Keep your existing gh/Octopool setup; do not symlink Gitcrawl as gh.
+      See https://gitcrawl.sh/gh-shim/ for migration details.
     EOS
   end
 

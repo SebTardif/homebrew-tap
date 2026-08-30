@@ -1,26 +1,26 @@
 class Octopool < Formula
   desc "Org-authenticated GitHub read relay and gh-compatible cache shim"
   homepage "https://github.com/openclaw/octopool"
-  version "0.5.14"
+  version "0.5.15"
   license "MIT"
 
   on_macos do
     if Hardware::CPU.arm?
       url "https://github.com/openclaw/octopool/releases/download/v#{version}/octopool_#{version}_darwin_arm64.tar.gz"
-      sha256 "325430f8aa8e2d487434f60f042b538339319babb95f530680ca611c403404ed"
+      sha256 "460d197ea20ef5cd75b1ab7f577255dc3cd0ab7f9531813d6e2f7e190397154f"
     else
       url "https://github.com/openclaw/octopool/releases/download/v#{version}/octopool_#{version}_darwin_amd64.tar.gz"
-      sha256 "fa08763f12a9974728b0e33865427200860c109e41a0514a887d22e2b5a5c774"
+      sha256 "8b2b4c636edc8cf0836d1544a706f9b63bd3b7ed7d203c1bec8113176187a91e"
     end
   end
 
   on_linux do
     if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
       url "https://github.com/openclaw/octopool/releases/download/v#{version}/octopool_#{version}_linux_arm64.tar.gz"
-      sha256 "976a73212d537f724b370d6f39134adcb53c24971abdadaabfbc475802f7392a"
+      sha256 "558c997eace543ea4b9c27f193824fe0d03981e29ded9f313301777aed8cb18b"
     else
       url "https://github.com/openclaw/octopool/releases/download/v#{version}/octopool_#{version}_linux_amd64.tar.gz"
-      sha256 "7086c9bd1a84f90dc0316efe11785e2e42cbd97c41ad5b54090bb672c2c4ea2e"
+      sha256 "9f48fe448b89e0b12abe26f5fd883e4179b9204d715003668c1147c7131001da"
     end
   end
 

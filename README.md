@@ -62,33 +62,32 @@ brew uninstall --cask --zap openclaw/tap/<name>
 
 ## Maintainers
 
-Most formula updates have two automated paths. Source-repository release workflows dispatch
+Formula updates have two automated paths. Source-repository release workflows dispatch
 `Update Formula` for immediate updates. That workflow accepts a Homebrew formula token, a semantic release tag, and a
 GitHub repository in `owner/repo` form. Optional artifact inputs must resolve to HTTPS release
 assets and may use only the placeholders documented by the workflow.
 
-**Crabbox is release-managed and excluded from both automated update paths.** Reconciliation skips
-it before parsing or release lookup, including selected and dry-run scans. Generic `Update Formula`
-dispatches and updater CLI writes for Crabbox are retired: legacy, exact-assets, and complete
-`verified-hashes-v1` inputs all fail before source-tag checks, downloads, or formula/cask writes.
-There is no force or readiness override. The public read-only `--verify-source-tag-only` CLI check
-remains available with the complete verified-hash input set; it grants no update authority.
+**Crabbox uses the ordinary four-target `assets` handoff after publication.** The
+[Crabbox release process](https://github.com/openclaw/crabbox/blob/main/docs/RELEASING.md)
+completes its prepublication checks, including native proof, before publishing. Publication
+establishes tap eligibility: the operator explicitly dispatches `Update Formula` with the tag and
+four published archive names/hashes. The updater downloads and hashes all four canonical GitHub
+release assets before writing, preserves maintained formula content, and succeeds when already
+current. Reconciliation is an independent fallback for stable published releases. Retry a failed tap
+handoff on its own; do not rebuild or republish to retry Homebrew.
 
-Only the existing [Crabbox release process](https://github.com/openclaw/crabbox/blob/main/docs/RELEASING.md)
-owns that formula handoff. After fresh public native verification, proxy-only public Go-install
-proof, and verification of all four public archive hashes, the release operator uses the protected
-`render-homebrew-formula.mjs` renderer and submits its exact literal output through a normal tap PR.
-Native Homebrew installation proof follows the tap merge; waiting for that proof before updating
-the formula would deadlock. This is an explicit release handoff, not an automatic completion event
-or a trigger on publication. Crabbox still receives all ordinary tap validation. Automation,
-schedules, tokens, permissions, and update contracts for other formulae are unchanged.
+Public native and proxy-only Go-install smokes remain required independent channel health checks,
+not an additional approval gate for the tap. Installed-Homebrew smoke follows the update.
+Crabbox's obsolete `verified-hashes-v1` write mode fails with guidance to use ordinary `assets`;
+caller-supplied hashes without public downloads cannot update that formula. Its read-only
+`--verify-source-tag-only` check still accepts the complete verified-hash input set without writing.
 
 Existing `Formula/*.rb` files own each tool's caveats and install instructions. The updater
 preserves that content while changing release metadata, so maintain it here rather than in an
 upstream release workflow. For Gitcrawl, see the [configuration reference](https://gitcrawl.sh/configuration/)
 and [gh shim migration to Octopool](https://gitcrawl.sh/gh-shim/).
 
-`Reconcile Formulae` is the self-healing fallback for non-release-managed formulae. Every three hours
+`Reconcile Formulae` is the self-healing fallback for formulae. Every three hours
 it derives each source repository from the formula's GitHub `homepage`, compares the formula with that repository's latest
 stable published release, and runs the same updater and checksum-download logic when the release is
 newer. It never downgrades, skips drafts and prereleases, and makes no commit when every formula is
@@ -104,7 +103,7 @@ for each Darwin/Linux amd64/arm64 target. The updater renders those names and ha
 downloads all four public release assets, and refuses to commit on any digest mismatch. Omitting
 `assets` preserves the legacy template and filename-guessing behavior for older callers.
 
-Four-target binary releases can use the workflow's `verified-hashes-v1` contract. Supply all four
+Other four-target binary releases can use the workflow's `verified-hashes-v1` contract. Supply all four
 canonical target SHA-256 inputs, `source_tag_object`, `source_tag_commit`, and `request_id` with an
 explicit `{target}` artifact template. This mode requires an existing formula, checks that the live
 source ref is the supplied annotated tag object and peeled commit, renders the target URL/checksum

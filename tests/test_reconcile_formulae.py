@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import importlib.util
+import json
 import io
 import os
 import pathlib
@@ -86,74 +88,119 @@ class ReconcileFormulaeTest(unittest.TestCase):
                 self.assertEqual(info.name, path.stem)
                 self.assertTrue(info.update_options)
 
-    def test_crabbox_skips_before_parsing_or_lookup_in_all_scan_modes(self) -> None:
+    def test_crabbox_reconciliation_uses_published_stable_releases_in_all_scan_modes(self) -> None:
+        original = (ROOT / "Formula" / "crabbox.rb").read_text()
+        info = reconcile_formulae.parse_formula(ROOT / "Formula" / "crabbox.rb")
+        newer = f"v{info.current_version.major}.{info.current_version.minor + 1}.0"
+        cases = (
+            ("published", newer, False, False, "updated"),
+            ("draft", newer, True, False, "skipped"),
+            ("prerelease", newer, False, True, "skipped"),
+            ("prerelease-tag", newer + "-rc.1", False, False, "skipped"),
+            ("no-release", None, False, False, "skipped"),
+            ("current", info.current_tag, False, False, "current"),
+            ("downgrade", "v0.0.0", False, False, "refused"),
+        )
         for selected in (None, "crabbox"):
             for dry_run in (False, True):
-                with self.subTest(selected=selected, dry_run=dry_run), tempfile.TemporaryDirectory() as directory:
-                    root = pathlib.Path(directory)
-                    (root / "Formula").mkdir()
-                    path = root / "Formula" / "crabbox.rb"
-                    path.write_text("not a parseable formula\n")
-                    before = path.read_bytes()
-                    output = io.StringIO()
-                    with (
-                        mock.patch.object(reconcile_formulae, "parse_formula") as parse,
-                        mock.patch.object(reconcile_formulae.update_formula, "sha256") as download,
-                        contextlib.redirect_stdout(output),
-                    ):
-                        lookup = mock.Mock()
-                        updater = mock.Mock()
-                        summary = reconcile_formulae.reconcile(root, selected, dry_run, lookup, updater)
-                    self.assertEqual(summary, reconcile_formulae.Summary(scanned=1, skipped=1))
-                    self.assertIn("SKIP crabbox:", output.getvalue())
-                    self.assertIn("release-managed", output.getvalue())
-                    self.assertIn("https://github.com/openclaw/crabbox/blob/main/docs/RELEASING.md", output.getvalue())
-                    for operation in (parse, lookup, updater, download):
-                        operation.assert_not_called()
-                    self.assertEqual(path.read_bytes(), before)
+                for label, tag, draft, prerelease, outcome in cases:
+                    with self.subTest(selected=selected, dry_run=dry_run, release=label):
+                        directory, root = self.make_tap()
+                        self.addCleanup(directory.cleanup)
+                        crabbox = root / "Formula" / "crabbox.rb"
+                        crabbox.write_text(original)
+                        downloads = []
 
-    def test_crabbox_skip_still_updates_another_stale_formula(self) -> None:
+                        def response(request, **kwargs):
+                            url = request.full_url
+                            if url == "https://api.github.com/repos/openclaw/crabbox/releases/latest":
+                                if tag is None:
+                                    raise reconcile_formulae.urllib.error.HTTPError(url, 404, "no release", {}, None)
+                                return io.BytesIO(json.dumps({
+                                    "tag_name": tag, "draft": draft, "prerelease": prerelease,
+                                }).encode())
+                            if url == "https://api.github.com/repos/openclaw/example/releases/latest":
+                                return io.BytesIO(b'{"tag_name":"v1.2.3","draft":false,"prerelease":false}')
+                            expected = [
+                                f"https://github.com/openclaw/crabbox/releases/download/{newer}/"
+                                f"crabbox_{newer[1:]}_{target}.tar.gz"
+                                for target in reconcile_formulae.update_formula.RELEASE_TARGETS
+                            ]
+                            self.assertIn(url, expected)
+                            downloads.append(url)
+                            return io.BytesIO(url.encode())
+
+                        def run(command, *, cwd, check):
+                            self.assertTrue(check)
+                            self.assertEqual(pathlib.Path(command[1]).name, "update_formula.py")
+                            previous_directory = pathlib.Path.cwd()
+                            os.chdir(cwd)
+                            try:
+                                self.assertEqual(reconcile_formulae.update_formula.main(command[2:]), 0)
+                            finally:
+                                os.chdir(previous_directory)
+
+                        output = io.StringIO()
+                        with (
+                            mock.patch.object(reconcile_formulae.urllib.request, "urlopen", side_effect=response),
+                            mock.patch.object(reconcile_formulae.subprocess, "run", side_effect=run) as update,
+                            contextlib.redirect_stdout(output),
+                        ):
+                            summary = reconcile_formulae.reconcile(root, selected, dry_run)
+                        expected_summary = reconcile_formulae.Summary(scanned=1 if selected else 2)
+                        if not selected:
+                            expected_summary.current = 1
+                        setattr(expected_summary, outcome, getattr(expected_summary, outcome) + 1)
+                        if outcome == "updated":
+                            expected_summary.drift = 1
+                            self.assertEqual(update.call_count, 1)
+                            self.assertEqual(len(downloads), 4)
+                            expected = original
+                            for match in reconcile_formulae.update_formula.iter_url_sha_pairs(original):
+                                target = reconcile_formulae.update_formula.classify_target(match.group("url"), {}, info.current_tag[1:])
+                                url = next(url for url in downloads if url.endswith(f"_{target}.tar.gz"))
+                                expected = expected.replace(match.group("url"), url).replace(
+                                    match.group("sha"), hashlib.sha256(url.encode()).hexdigest(),
+                                )
+                            if dry_run:
+                                self.assertIn("WOULD UPDATE crabbox", output.getvalue())
+                                for line in expected.splitlines():
+                                    if line.strip().startswith(('url "', 'sha256 "')):
+                                        self.assertIn("+" + line, output.getvalue())
+                            self.assertEqual(crabbox.read_text(), original if dry_run else expected)
+                        else:
+                            update.assert_not_called()
+                            self.assertEqual(downloads, [])
+                            self.assertEqual(crabbox.read_text(), original)
+                        self.assertEqual(summary, expected_summary)
+                        self.assertEqual((root / "Formula" / "example.rb").read_text(), formula_text())
+
+    def test_crabbox_and_another_stale_formula_both_reconcile(self) -> None:
         directory, root = self.make_tap()
         self.addCleanup(directory.cleanup)
         crabbox = root / "Formula" / "crabbox.rb"
         crabbox.write_bytes((ROOT / "Formula" / "crabbox.rb").read_bytes())
-        before = crabbox.read_bytes()
-        lookup = mock.Mock(return_value=reconcile_formulae.Release("v1.2.4", False, False))
-
+        lookup = mock.Mock(return_value=reconcile_formulae.Release("v99.0.0", False, False))
         def updater(root: pathlib.Path, info: reconcile_formulae.FormulaInfo, tag: str, dry_run: bool) -> None:
             self.assertFalse(dry_run)
             previous_directory = pathlib.Path.cwd()
             os.chdir(root)
             try:
-                reconcile_formulae.update_formula.main([
+                self.assertEqual(reconcile_formulae.update_formula.main([
                     "--formula", info.name, "--tag", tag, "--repository", info.repository, *info.update_options,
-                ])
+                ]), 0)
             finally:
                 os.chdir(previous_directory)
 
         with mock.patch.object(reconcile_formulae.update_formula, "sha256", return_value="e" * 64) as download:
             summary = reconcile_formulae.reconcile(root, None, False, lookup, updater)
-        self.assertEqual(summary, reconcile_formulae.Summary(scanned=2, skipped=1, drift=1, updated=1))
-        lookup.assert_called_once_with("openclaw/example")
-        self.assertEqual(download.call_count, 4)
-        updated = (root / "Formula" / "example.rb").read_text()
-        self.assertIn('version "1.2.4"', updated)
-        self.assertEqual(updated.count('sha256 "' + "e" * 64 + '"'), 4)
-        self.assertEqual(crabbox.read_bytes(), before)
-
-    def test_crabbox_symlink_alias_is_skipped_before_parsing(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = pathlib.Path(directory)
-            (root / "Formula").mkdir()
-            (root / "Formula" / "crabbox.rb").write_text("not a parseable formula\n")
-            (root / "Formula" / "example.rb").symlink_to("crabbox.rb")
-            with mock.patch.object(reconcile_formulae, "parse_formula") as parse:
-                lookup = mock.Mock()
-                updater = mock.Mock()
-                summary = reconcile_formulae.reconcile(root, "example", True, lookup, updater)
-            self.assertEqual(summary, reconcile_formulae.Summary(scanned=1, skipped=1))
-            for operation in (parse, lookup, updater):
-                operation.assert_not_called()
+        self.assertEqual(summary, reconcile_formulae.Summary(scanned=2, drift=2, updated=2))
+        self.assertCountEqual(lookup.call_args_list, [mock.call("openclaw/crabbox"), mock.call("openclaw/example")])
+        self.assertEqual(download.call_count, 8)
+        for name in ("crabbox", "example"):
+            updated = (root / "Formula" / f"{name}.rb").read_text()
+            self.assertEqual(updated.count(f"https://github.com/openclaw/{name}/releases/download/v99.0.0/"), 4)
+            self.assertEqual(updated.count('sha256 "' + "e" * 64 + '"'), 4)
 
     def test_no_drift_does_not_run_updater_or_change_formula(self) -> None:
         directory, root = self.make_tap()

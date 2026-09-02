@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import io
 import json
 import os
 import pathlib
 import re
 import tempfile
 import unittest
+import urllib.error
 from unittest import mock
 
 
@@ -43,14 +46,20 @@ def platform_install_formula() -> str:
     return "\n".join([*lines, "  test do", '    system bin/"example", "--version"', "  end", "end", ""])
 
 
+def crabbox_assets() -> dict[str, dict[str, str]]:
+    return {
+        target: {
+            "name": f"crabbox_1.2.3_{target}.tar.gz",
+            "sha256": hashlib.sha256(target.encode()).hexdigest(),
+        }
+        for target in update_formula.RELEASE_TARGETS
+    }
+
+
 def crabbox_arguments(mode: str) -> list[str]:
     arguments = ["--formula", "crabbox", "--tag", "v1.2.3", "--repository", "openclaw/crabbox"]
     if mode == "explicit-assets":
-        assets = {
-            target: {"name": f"crabbox_1.2.3_{target}.tar.gz", "sha256": "e" * 64}
-            for target in update_formula.RELEASE_TARGETS
-        }
-        arguments += ["--assets-json", json.dumps(assets)]
+        arguments += ["--assets-json", json.dumps(crabbox_assets())]
     elif mode in ("legacy-template", "verified-hashes"):
         arguments += ["--artifact-template", "{formula}_{version}_{target}.tar.gz"]
     elif mode == "legacy-url":
@@ -61,13 +70,13 @@ def crabbox_arguments(mode: str) -> list[str]:
         arguments += [
             "--source-tag-object", "b" * 40,
             "--source-tag-commit", "a" * 40,
-            "--request-id", "crabbox-readiness-regression",
+            "--request-id", "crabbox-contract-regression",
         ]
     return arguments
 
 
 class UpdateFormulaTest(unittest.TestCase):
-    def assert_release_managed_rejection(self, root: pathlib.Path, arguments: list[str]) -> None:
+    def assert_crabbox_verified_write_rejection(self, root: pathlib.Path, arguments: list[str]) -> None:
         before = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
         previous_directory = pathlib.Path.cwd()
         os.chdir(root)
@@ -85,8 +94,8 @@ class UpdateFormulaTest(unittest.TestCase):
                 mock.patch.object(pathlib.Path, "write_text") as write,
             ):
                 for operation in (*operations.values(), network, process, write):
-                    operation.side_effect = AssertionError("side effect before release-management rejection")
-                with self.assertRaisesRegex(SystemExit, "release-managed.*docs/RELEASING.md"):
+                    operation.side_effect = AssertionError("side effect before obsolete-contract rejection")
+                with self.assertRaisesRegex(SystemExit, "Crabbox.*ordinary.*assets.*docs/RELEASING.md"):
                     update_formula.main(arguments)
                 for operation in (*operations.values(), network, process, write):
                     operation.assert_not_called()
@@ -96,43 +105,161 @@ class UpdateFormulaTest(unittest.TestCase):
             {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}, before
         )
 
-    def test_crabbox_rejects_every_generic_write_before_side_effects(self) -> None:
-        for mode in ("legacy", "legacy-template", "legacy-url", "explicit-assets", "verified-hashes"):
+    def test_crabbox_rejects_verified_hash_writes_before_side_effects(self) -> None:
+        for existing in (False, True):
+            for cask in (False, True):
+                with self.subTest(existing=existing, cask=cask), tempfile.TemporaryDirectory() as directory:
+                    root = pathlib.Path(directory)
+                    (root / "Formula").mkdir()
+                    (root / "Casks").mkdir()
+                    if existing:
+                        (root / "Formula" / "crabbox.rb").write_bytes((ROOT / "Formula" / "crabbox.rb").read_bytes())
+                        (root / "Casks" / "example.rb").write_text('cask "example" do\nend\n')
+                    arguments = crabbox_arguments("verified-hashes")
+                    if cask:
+                        arguments += ["--cask", "example", "--cask-artifact", "example-{version}.zip"]
+                    self.assert_crabbox_verified_write_rejection(root, arguments)
+
+    def test_crabbox_path_aliases_cannot_bypass_verified_hash_write_rejection(self) -> None:
+        for alias in ("symlink", "dangling-symlink", "hardlink", "cask-directory"):
+            with self.subTest(alias=alias), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                (root / "Formula").mkdir()
+                managed = root / "Formula" / "crabbox.rb"
+                if alias != "dangling-symlink":
+                    managed.write_bytes((ROOT / "Formula" / "crabbox.rb").read_bytes())
+                path = root / "Formula" / "example.rb"
+                arguments = crabbox_arguments("verified-hashes")
+                arguments[1] = "example"
+                if alias == "hardlink":
+                    path.hardlink_to(managed)
+                elif alias == "cask-directory":
+                    path.write_text(platform_install_formula())
+                    (root / "Casks").symlink_to("Formula", target_is_directory=True)
+                    arguments += ["--cask", "crabbox", "--cask-artifact", "example.zip"]
+                else:
+                    path.symlink_to("crabbox.rb")
+                self.assert_crabbox_verified_write_rejection(root, arguments)
+
+    def test_crabbox_ordinary_updates_download_all_targets_and_preserve_content(self) -> None:
+        original = (ROOT / "Formula" / "crabbox.rb").read_text()
+        assets = crabbox_assets()
+        expected = original
+        for match in update_formula.iter_url_sha_pairs(original):
+            target = update_formula.classify_target(match.group("url"), {}, "1.2.3")
+            item = assets[target]
+            expected = expected.replace(match.group("url"), update_formula.explicit_asset_url(
+                "openclaw/crabbox", "v1.2.3", item["name"],
+            )).replace(match.group("sha"), item["sha256"])
+        urls = {
+            update_formula.explicit_asset_url("openclaw/crabbox", "v1.2.3", item["name"]): target.encode()
+            for target, item in assets.items()
+        }
+        for mode in ("explicit-assets", "legacy", "legacy-template"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                (root / "Formula").mkdir()
+                path = root / "Formula" / "crabbox.rb"
+                path.write_text(original)
+                other = root / "Formula" / "example.rb"
+                other.write_text(platform_install_formula())
+                previous_directory = pathlib.Path.cwd()
+                os.chdir(root)
+                try:
+                    for current in (False, True):
+                        before = path.read_bytes()
+
+                        def download(request):
+                            self.assertEqual(path.read_bytes(), before)
+                            return io.BytesIO(urls[request.full_url])
+
+                        with (
+                            mock.patch.object(update_formula.urllib.request, "urlopen", side_effect=download) as network,
+                            mock.patch.object(update_formula, "verify_remote_source_tag") as verify_tag,
+                        ):
+                            self.assertEqual(update_formula.main(crabbox_arguments(mode)), 0)
+                        self.assertCountEqual([call.args[0].full_url for call in network.call_args_list], urls)
+                        verify_tag.assert_not_called()
+                        self.assertEqual(path.read_text(), expected)
+                        if current:
+                            self.assertEqual(path.read_bytes(), before)
+                    self.assertEqual(other.read_text(), platform_install_formula())
+                finally:
+                    os.chdir(previous_directory)
+
+    def test_explicit_asset_failures_leave_no_formula_or_cask_mutations(self) -> None:
+        for formula in ("crabbox", "example"):
             for existing in (False, True):
-                for cask in (False, True):
-                    with self.subTest(mode=mode, existing=existing, cask=cask), tempfile.TemporaryDirectory() as directory:
+                for failure in ("wrong-hash", "missing-download", "missing-target"):
+                    with self.subTest(formula=formula, existing=existing, failure=failure), tempfile.TemporaryDirectory() as directory:
                         root = pathlib.Path(directory)
                         (root / "Formula").mkdir()
                         (root / "Casks").mkdir()
+                        path = root / "Formula" / f"{formula}.rb"
                         if existing:
-                            (root / "Formula" / "crabbox.rb").write_bytes((ROOT / "Formula" / "crabbox.rb").read_bytes())
-                            (root / "Casks" / "example.rb").write_text('cask "example" do\nend\n')
-                        arguments = crabbox_arguments(mode)
-                        if cask:
-                            arguments += ["--cask", "example", "--cask-artifact", "example-{version}.zip"]
-                        self.assert_release_managed_rejection(root, arguments)
+                            path.write_text((ROOT / "Formula" / "crabbox.rb").read_text())
+                        (root / "Casks" / "example.rb").write_text('cask "example" do\nend\n')
+                        before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*.rb")}
+                        assets = crabbox_assets()
+                        if failure == "missing-target":
+                            del assets["linux_arm64"]
+                        arguments = [
+                            "--formula", formula, "--tag", "v1.2.3", "--repository", "openclaw/crabbox",
+                            "--assets-json", json.dumps(assets), "--cask", "example", "--cask-artifact", "example.zip",
+                        ]
 
-    def test_crabbox_path_aliases_cannot_bypass_generic_write_gate(self) -> None:
-        for mode in ("legacy", "explicit-assets", "verified-hashes"):
-            for alias in ("symlink", "dangling-symlink", "hardlink", "cask-directory"):
-                with self.subTest(mode=mode, alias=alias), tempfile.TemporaryDirectory() as directory:
-                    root = pathlib.Path(directory)
-                    (root / "Formula").mkdir()
-                    managed = root / "Formula" / "crabbox.rb"
-                    if alias != "dangling-symlink":
-                        managed.write_bytes((ROOT / "Formula" / "crabbox.rb").read_bytes())
-                    path = root / "Formula" / "example.rb"
-                    arguments = crabbox_arguments(mode)
-                    arguments[1] = "example"
-                    if alias == "hardlink":
-                        path.hardlink_to(managed)
-                    elif alias == "cask-directory":
-                        path.write_text(platform_install_formula())
-                        (root / "Casks").symlink_to("Formula", target_is_directory=True)
-                        arguments += ["--cask", "crabbox", "--cask-artifact", "example.zip"]
-                    else:
-                        path.symlink_to("crabbox.rb")
-                    self.assert_release_managed_rejection(root, arguments)
+                        def download(request):
+                            self.assertEqual({p.relative_to(root): p.read_bytes() for p in root.rglob("*.rb")}, before)
+                            target = next(t for t, item in assets.items() if request.full_url.endswith(item["name"]))
+                            if target == "linux_arm64":
+                                if failure == "missing-download":
+                                    raise urllib.error.HTTPError(request.full_url, 404, "missing asset", {}, None)
+                                return io.BytesIO(b"wrong bytes")
+                            return io.BytesIO(target.encode())
+
+                        previous_directory = pathlib.Path.cwd()
+                        os.chdir(root)
+                        try:
+                            with (
+                                mock.patch.object(update_formula.urllib.request, "urlopen", side_effect=download) as network,
+                                mock.patch.object(update_formula, "update_cask") as cask,
+                                self.assertRaisesRegex(
+                                    (SystemExit, urllib.error.HTTPError),
+                                    "SHA-256 mismatch|404|must contain exactly",
+                                ),
+                            ):
+                                update_formula.main(arguments)
+                            self.assertEqual(network.call_count, 0 if failure == "missing-target" else 4)
+                            cask.assert_not_called()
+                        finally:
+                            os.chdir(previous_directory)
+                        self.assertEqual({p.relative_to(root): p.read_bytes() for p in root.rglob("*.rb")}, before)
+
+    def test_explicit_assets_create_missing_formula_only_after_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "Formula").mkdir()
+            path = root / "Formula" / "crabbox.rb"
+
+            def download(request):
+                self.assertFalse(path.exists())
+                target = next(t for t, item in crabbox_assets().items() if request.full_url.endswith(item["name"]))
+                return io.BytesIO(target.encode())
+
+            previous_directory = pathlib.Path.cwd()
+            os.chdir(root)
+            try:
+                with mock.patch.object(update_formula.urllib.request, "urlopen", side_effect=download) as network:
+                    self.assertEqual(update_formula.main(crabbox_arguments("explicit-assets")), 0)
+                self.assertEqual(network.call_count, 4)
+            finally:
+                os.chdir(previous_directory)
+            pairs = update_formula.iter_url_sha_pairs(path.read_text())
+            self.assertCountEqual(
+                [(match.group("url"), match.group("sha")) for match in pairs],
+                [(update_formula.explicit_asset_url("openclaw/crabbox", "v1.2.3", item["name"]), item["sha256"])
+                 for item in crabbox_assets().values()],
+            )
 
     def test_crabbox_complete_verify_only_is_read_only_even_without_formula(self) -> None:
         for existing in (False, True):

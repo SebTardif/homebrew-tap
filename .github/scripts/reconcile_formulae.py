@@ -331,6 +331,11 @@ def reconcile(
     summary = Summary()
     for path in formula_paths(root, selected):
         summary.scanned += 1
+        reason = update_formula.release_management_reason(path, root)
+        if reason:
+            summary.skipped += 1
+            print(f"SKIP {path.stem}: {reason}")
+            continue
         try:
             info = parse_formula(path)
         except (OSError, ValueError) as error:

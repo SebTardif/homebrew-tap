@@ -18,7 +18,169 @@ update_formula = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(update_formula)
 
 
+def platform_install_formula() -> str:
+    lines = [
+        "class Example < Formula",
+        '  desc "Example CLI"',
+        '  homepage "https://github.com/openclaw/example"',
+        '  license "MIT"',
+    ]
+    for platform, target_os in (("macos", "darwin"), ("linux", "linux")):
+        lines.append(f"  on_{platform} do")
+        for cpu, arch in (("intel", "amd64"), ("arm", "arm64")):
+            lines.extend([
+                f"    if Hardware::CPU.{cpu}?",
+                f'      url "https://github.com/openclaw/example/releases/download/v0.43.0/'
+                f'example_0.43.0_{target_os}_{arch}.tar.gz"',
+                f'      sha256 "{"a" * 64}"',
+                "      define_method(:install) do",
+                '        bin.install "example"',
+                '        bin.install "example-helper" if OS.mac? && Hardware::CPU.arm?',
+                "      end",
+                "    end",
+            ])
+        lines.append("  end")
+    return "\n".join([*lines, "  test do", '    system bin/"example", "--version"', "  end", "end", ""])
+
+
+def crabbox_arguments(mode: str) -> list[str]:
+    arguments = ["--formula", "crabbox", "--tag", "v1.2.3", "--repository", "openclaw/crabbox"]
+    if mode == "explicit-assets":
+        assets = {
+            target: {"name": f"crabbox_1.2.3_{target}.tar.gz", "sha256": "e" * 64}
+            for target in update_formula.RELEASE_TARGETS
+        }
+        arguments += ["--assets-json", json.dumps(assets)]
+    elif mode in ("legacy-template", "verified-hashes"):
+        arguments += ["--artifact-template", "{formula}_{version}_{target}.tar.gz"]
+    elif mode == "legacy-url":
+        arguments += ["--artifact-url", "https://example.test/{formula}_{version}.tar.gz"]
+    if mode == "verified-hashes":
+        for target in update_formula.RELEASE_TARGETS:
+            arguments += [f"--{target.replace('_', '-')}-sha256", "e" * 64]
+        arguments += [
+            "--source-tag-object", "b" * 40,
+            "--source-tag-commit", "a" * 40,
+            "--request-id", "crabbox-readiness-regression",
+        ]
+    return arguments
+
+
 class UpdateFormulaTest(unittest.TestCase):
+    def assert_release_managed_rejection(self, root: pathlib.Path, arguments: list[str]) -> None:
+        before = {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+        previous_directory = pathlib.Path.cwd()
+        os.chdir(root)
+        try:
+            with (
+                mock.patch.multiple(
+                    update_formula,
+                    sha256=mock.DEFAULT,
+                    verify_remote_source_tag=mock.DEFAULT,
+                    seed_formula=mock.DEFAULT,
+                    update_cask=mock.DEFAULT,
+                ) as operations,
+                mock.patch.object(update_formula.urllib.request, "urlopen") as network,
+                mock.patch.object(update_formula.subprocess, "run") as process,
+                mock.patch.object(pathlib.Path, "write_text") as write,
+            ):
+                for operation in (*operations.values(), network, process, write):
+                    operation.side_effect = AssertionError("side effect before release-management rejection")
+                with self.assertRaisesRegex(SystemExit, "release-managed.*docs/RELEASING.md"):
+                    update_formula.main(arguments)
+                for operation in (*operations.values(), network, process, write):
+                    operation.assert_not_called()
+        finally:
+            os.chdir(previous_directory)
+        self.assertEqual(
+            {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}, before
+        )
+
+    def test_crabbox_rejects_every_generic_write_before_side_effects(self) -> None:
+        for mode in ("legacy", "legacy-template", "legacy-url", "explicit-assets", "verified-hashes"):
+            for existing in (False, True):
+                for cask in (False, True):
+                    with self.subTest(mode=mode, existing=existing, cask=cask), tempfile.TemporaryDirectory() as directory:
+                        root = pathlib.Path(directory)
+                        (root / "Formula").mkdir()
+                        (root / "Casks").mkdir()
+                        if existing:
+                            (root / "Formula" / "crabbox.rb").write_bytes((ROOT / "Formula" / "crabbox.rb").read_bytes())
+                            (root / "Casks" / "example.rb").write_text('cask "example" do\nend\n')
+                        arguments = crabbox_arguments(mode)
+                        if cask:
+                            arguments += ["--cask", "example", "--cask-artifact", "example-{version}.zip"]
+                        self.assert_release_managed_rejection(root, arguments)
+
+    def test_crabbox_path_aliases_cannot_bypass_generic_write_gate(self) -> None:
+        for mode in ("legacy", "explicit-assets", "verified-hashes"):
+            for alias in ("symlink", "dangling-symlink", "hardlink", "cask-directory"):
+                with self.subTest(mode=mode, alias=alias), tempfile.TemporaryDirectory() as directory:
+                    root = pathlib.Path(directory)
+                    (root / "Formula").mkdir()
+                    managed = root / "Formula" / "crabbox.rb"
+                    if alias != "dangling-symlink":
+                        managed.write_bytes((ROOT / "Formula" / "crabbox.rb").read_bytes())
+                    path = root / "Formula" / "example.rb"
+                    arguments = crabbox_arguments(mode)
+                    arguments[1] = "example"
+                    if alias == "hardlink":
+                        path.hardlink_to(managed)
+                    elif alias == "cask-directory":
+                        path.write_text(platform_install_formula())
+                        (root / "Casks").symlink_to("Formula", target_is_directory=True)
+                        arguments += ["--cask", "crabbox", "--cask-artifact", "example.zip"]
+                    else:
+                        path.symlink_to("crabbox.rb")
+                    self.assert_release_managed_rejection(root, arguments)
+
+    def test_crabbox_complete_verify_only_is_read_only_even_without_formula(self) -> None:
+        for existing in (False, True):
+            with self.subTest(existing=existing), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                if existing:
+                    (root / "Formula").mkdir()
+                    (root / "Formula" / "crabbox.rb").write_bytes((ROOT / "Formula" / "crabbox.rb").read_bytes())
+                before = sorted(root.rglob("*"))
+                previous_directory = pathlib.Path.cwd()
+                os.chdir(root)
+                try:
+                    with (
+                        mock.patch.object(update_formula, "verify_remote_source_tag") as verify_tag,
+                        mock.patch.object(update_formula, "sha256") as download,
+                        mock.patch.object(update_formula, "seed_formula") as seed,
+                        mock.patch.object(update_formula, "update_cask") as cask,
+                        mock.patch.object(pathlib.Path, "write_text") as write,
+                    ):
+                        self.assertEqual(update_formula.main(crabbox_arguments("verified-hashes") + ["--verify-source-tag-only"]), 0)
+                        verify_tag.assert_called_once_with("openclaw/crabbox", "v1.2.3", "b" * 40, "a" * 40)
+                        for operation in (download, seed, cask, write):
+                            operation.assert_not_called()
+                finally:
+                    os.chdir(previous_directory)
+                self.assertEqual(sorted(root.rglob("*")), before)
+                if existing:
+                    self.assertEqual((root / "Formula" / "crabbox.rb").read_bytes(), (ROOT / "Formula" / "crabbox.rb").read_bytes())
+
+    def test_crabbox_legacy_and_partial_verify_only_fail_before_tag_lookup(self) -> None:
+        for extra in ([], ["--darwin-amd64-sha256", "e" * 64]):
+            with self.subTest(extra=extra), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                previous_directory = pathlib.Path.cwd()
+                os.chdir(root)
+                try:
+                    with (
+                        mock.patch.object(update_formula, "verify_remote_source_tag") as verify_tag,
+                        mock.patch.object(update_formula, "sha256") as download,
+                        self.assertRaisesRegex(SystemExit, "requires.*(?:complete|all inputs)"),
+                    ):
+                        update_formula.main(crabbox_arguments("legacy") + extra + ["--verify-source-tag-only"])
+                    verify_tag.assert_not_called()
+                    download.assert_not_called()
+                finally:
+                    os.chdir(previous_directory)
+                self.assertEqual(list(root.iterdir()), [])
+
     def test_gitcrawl_description_matches_archive_search_and_clustering(self) -> None:
         formula = (ROOT / "Formula" / "gitcrawl.rb").read_text()
         description = re.search(r'^  desc "([^"]+)"$', formula, re.MULTILINE)
@@ -160,6 +322,8 @@ class UpdateFormulaTest(unittest.TestCase):
 
         invalid_values = (
             (update_formula.validate_tap_token, ("../../README", "formula")),
+            (update_formula.validate_tap_token, ("Crabbox", "formula")),
+            (update_formula.validate_tap_token, ("./crabbox", "formula")),
             (update_formula.validate_repository, ("openclaw/gogcli/extra",)),
             (update_formula.validate_release_tag, ('v1.2.3"\nsystem("id")',)),
         )
@@ -538,7 +702,7 @@ end
             self.assertEqual(updated.count(digest), 1)
 
     def test_verified_hash_mode_preserves_formula_specific_install_blocks(self) -> None:
-        formula = (ROOT / "Formula" / "crabbox.rb").read_text()
+        formula = platform_install_formula()
         hashes = {
             "darwin_amd64": "1" * 64,
             "darwin_arm64": "2" * 64,
@@ -548,9 +712,9 @@ end
 
         updated = update_formula.render_verified_target_formula(
             formula,
-            "openclaw/crabbox",
+            "openclaw/example",
             "v0.36.1",
-            "crabbox",
+            "example",
             "0.36.1",
             "{formula}_{version}_{target}.tar.gz",
             {},
@@ -559,14 +723,14 @@ end
 
         self.assertNotRegex(updated, r"(?m)^\s*version(?:\s|$)")
         self.assertEqual(updated.count("define_method(:install) do"), 4)
-        self.assertEqual(updated.count('bin.install "crabbox"'), 4)
-        self.assertEqual(updated.count('bin.install "crabbox-apple-vm-helper"'), 4)
+        self.assertEqual(updated.count('bin.install "example"'), 4)
+        self.assertEqual(updated.count('bin.install "example-helper"'), 4)
         for target, digest in hashes.items():
-            self.assertIn(f"crabbox_#{{version}}_{target}.tar.gz", updated)
+            self.assertIn(f"example_#{{version}}_{target}.tar.gz", updated)
             self.assertEqual(updated.count(digest), 1)
 
     def test_verified_hash_mode_rejects_duplicate_or_mismatched_version_lines(self) -> None:
-        formula = (ROOT / "Formula" / "crabbox.rb").read_text()
+        formula = platform_install_formula()
         hashes = {
             "darwin_amd64": "1" * 64,
             "darwin_arm64": "2" * 64,
@@ -590,9 +754,9 @@ end
             with self.subTest(description=description), self.assertRaisesRegex(SystemExit, message):
                 update_formula.render_verified_target_formula(
                     candidate,
-                    "openclaw/crabbox",
+                    "openclaw/example",
                     "v0.43.1",
-                    "crabbox",
+                    "example",
                     "0.43.1",
                     "{formula}_{version}_{target}.tar.gz",
                     {},

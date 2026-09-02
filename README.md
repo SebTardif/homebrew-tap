@@ -62,18 +62,34 @@ brew uninstall --cask --zap openclaw/tap/<name>
 
 ## Maintainers
 
-Formula updates have two paths. Source-repository release workflows dispatch `Update Formula` for
-immediate updates. That workflow accepts a Homebrew formula token, a semantic release tag, and a
+Most formula updates have two automated paths. Source-repository release workflows dispatch
+`Update Formula` for immediate updates. That workflow accepts a Homebrew formula token, a semantic release tag, and a
 GitHub repository in `owner/repo` form. Optional artifact inputs must resolve to HTTPS release
 assets and may use only the placeholders documented by the workflow.
+
+**Crabbox is release-managed and excluded from both automated update paths.** Reconciliation skips
+it before parsing or release lookup, including selected and dry-run scans. Generic `Update Formula`
+dispatches and updater CLI writes for Crabbox are retired: legacy, exact-assets, and complete
+`verified-hashes-v1` inputs all fail before source-tag checks, downloads, or formula/cask writes.
+There is no force or readiness override. The public read-only `--verify-source-tag-only` CLI check
+remains available with the complete verified-hash input set; it grants no update authority.
+
+Only the existing [Crabbox release process](https://github.com/openclaw/crabbox/blob/main/docs/RELEASING.md)
+owns that formula handoff. After fresh public native verification, proxy-only public Go-install
+proof, and verification of all four public archive hashes, the release operator uses the protected
+`render-homebrew-formula.mjs` renderer and submits its exact literal output through a normal tap PR.
+Native Homebrew installation proof follows the tap merge; waiting for that proof before updating
+the formula would deadlock. This is an explicit release handoff, not an automatic completion event
+or a trigger on publication. Crabbox still receives all ordinary tap validation. Automation,
+schedules, tokens, permissions, and update contracts for other formulae are unchanged.
 
 Existing `Formula/*.rb` files own each tool's caveats and install instructions. The updater
 preserves that content while changing release metadata, so maintain it here rather than in an
 upstream release workflow. For Gitcrawl, see the [configuration reference](https://gitcrawl.sh/configuration/)
 and [gh shim migration to Octopool](https://gitcrawl.sh/gh-shim/).
 
-`Reconcile Formulae` is the self-healing fallback. Every three hours it derives each source
-repository from the formula's GitHub `homepage`, compares the formula with that repository's latest
+`Reconcile Formulae` is the self-healing fallback for non-release-managed formulae. Every three hours
+it derives each source repository from the formula's GitHub `homepage`, compares the formula with that repository's latest
 stable published release, and runs the same updater and checksum-download logic when the release is
 newer. It never downgrades, skips drafts and prereleases, and makes no commit when every formula is
 current. Manual reconciles default to dry-run and can target one formula. The reconciler reads public

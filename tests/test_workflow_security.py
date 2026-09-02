@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import re
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
@@ -190,6 +192,72 @@ class WorkflowSecurityTest(unittest.TestCase):
         self.assertIn("python3 -m unittest discover -s tests -v", push_step)
         self.assertIn("brew style Formula/*.rb", push_step)
         self.assertIn('git push origin "HEAD:refs/heads/${DEFAULT_BRANCH}"', push_step)
+
+    def test_crabbox_policy_rejection_stops_workflow_before_commit_or_push(self) -> None:
+        workflow = UPDATE_WORKFLOW.read_text()
+        update = named_step_run(workflow, "Update formula")
+        push = named_step_run(workflow, "Commit and push")
+        for mode in ("legacy", "explicit-assets", "verified-hashes"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                scripts = root / ".github" / "scripts"
+                scripts.mkdir(parents=True)
+                (scripts / "update_formula.py").write_bytes((ROOT / ".github" / "scripts" / "update_formula.py").read_bytes())
+                (root / "Formula").mkdir()
+                formula = root / "Formula" / "crabbox.rb"
+                formula.write_bytes((ROOT / "Formula" / "crabbox.rb").read_bytes())
+                wrapper = root / "mock-updater.py"
+                wrapper.write_text('''import runpy
+import sys
+from unittest import mock
+sys.argv = sys.argv[1:]
+with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network attempted")), \\
+     mock.patch("subprocess.run", side_effect=AssertionError("source tag lookup attempted")):
+    runpy.run_path(sys.argv[0], run_name="__main__")
+''')
+                harness = f'''git() {{ printf '%s\\n' "$*" >> "$GIT_CALLS"; }}
+                gh() {{ printf '%s\\n' "$*" >> "$GIT_CALLS"; }}
+                python3() {{ "$PYTHON" "$WRAPPER" "$@"; }}
+                {update}
+                {push}
+                '''
+                environment = dict.fromkeys((
+                    "ARTIFACT_TEMPLATE", "ARTIFACT_URL", "ASSETS_JSON", "CASK", "CASK_ARTIFACT",
+                    "DARWIN_AMD64_SHA256", "DARWIN_ARM64_SHA256", "DESCRIPTION", "LINUX_AMD64_SHA256",
+                    "LINUX_ARM64_SHA256", "LINUX_URL", "MACOS_ARTIFACT", "REQUEST_ID",
+                    "SOURCE_TAG_COMMIT", "SOURCE_TAG_OBJECT", "TARGET_ALIASES",
+                ), "")
+                environment.update({
+                    "PATH": os.defpath,
+                    "FORMULA": "crabbox",
+                    "TAG": "v1.2.3",
+                    "REPOSITORY": "openclaw/crabbox",
+                    "GIT_CALLS": str(root / "git-calls"),
+                    "PYTHON": sys.executable,
+                    "WRAPPER": str(wrapper),
+                })
+                targets = ("darwin_amd64", "darwin_arm64", "linux_amd64", "linux_arm64")
+                if mode == "explicit-assets":
+                    environment["ASSETS_JSON"] = json.dumps({
+                        target: {"name": f"crabbox_1.2.3_{target}.tar.gz", "sha256": "e" * 64}
+                        for target in targets
+                    })
+                if mode == "verified-hashes":
+                    environment.update({target.upper() + "_SHA256": "e" * 64 for target in targets})
+                    environment.update({
+                        "ARTIFACT_TEMPLATE": "{formula}_{version}_{target}.tar.gz",
+                        "SOURCE_TAG_COMMIT": "a" * 40,
+                        "SOURCE_TAG_OBJECT": "b" * 40,
+                        "REQUEST_ID": "crabbox-policy-regression",
+                    })
+                completed = subprocess.run(
+                    ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", harness],
+                    cwd=root, env=environment, check=False, capture_output=True, text=True,
+                )
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn("release-managed", completed.stderr)
+                self.assertFalse((root / "git-calls").exists())
+                self.assertEqual(formula.read_bytes(), (ROOT / "Formula" / "crabbox.rb").read_bytes())
 
     def test_push_retries_after_main_advances(self) -> None:
         script = named_step_run(UPDATE_WORKFLOW.read_text(), "Commit and push")

@@ -34,6 +34,22 @@ REQUEST_ID_PATTERN = re.compile(r"[A-Za-z0-9][-A-Za-z0-9._:]{0,127}")
 RELEASE_TARGETS = ("darwin_amd64", "darwin_arm64", "linux_amd64", "linux_arm64")
 CANONICAL_TARGETS = frozenset(("darwin_universal", *RELEASE_TARGETS))
 TEMPLATE_FIELDS = frozenset(("formula", "version", "tag", "target"))
+RELEASE_MANAGED_FORMULAE = {
+    "crabbox": (
+        "release-managed; use Crabbox's release process and a normal tap PR after public native "
+        "and Go-install verification: https://github.com/openclaw/crabbox/blob/main/docs/RELEASING.md"
+    ),
+}
+
+
+def release_management_reason(path: pathlib.Path, root: pathlib.Path) -> str | None:
+    for formula, reason in RELEASE_MANAGED_FORMULAE.items():
+        managed = root / "Formula" / f"{formula}.rb"
+        if path.resolve() == managed.resolve() or (
+            path.exists() and managed.exists() and path.samefile(managed)
+        ):
+            return reason
+    return None
 
 
 def validate_tap_token(value: str, description: str) -> str:
@@ -1093,6 +1109,14 @@ def main(argv: list[str] | None = None) -> int:
     args.tag = validate_release_tag(args.tag)
     if args.cask:
         args.cask = validate_tap_token(args.cask, "cask")
+    if not args.verify_source_tag_only:
+        paths = [tap_path("Formula", args.formula)]
+        if args.cask:
+            paths.append(tap_path("Casks", args.cask))
+        for path in paths:
+            reason = release_management_reason(path, pathlib.Path.cwd())
+            if reason:
+                raise SystemExit(f"refusing generic update of {path}: {reason}")
     if args.macos_artifact:
         validate_artifact_token(args.macos_artifact, "macOS artifact")
     if args.linux_url:

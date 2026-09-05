@@ -699,11 +699,16 @@ end
         self.assertTrue(any(command[-1] == f"refs/tags/{tag}^{{commit}}" for command in commands))
         for call in run.call_args_list:
             options = call.kwargs
+            command = call.args[0]
             self.assertEqual(options["cwd"], "/")
             self.assertEqual(options["env"]["GIT_CONFIG_GLOBAL"], "/dev/null")
             self.assertEqual(options["env"]["GIT_TERMINAL_PROMPT"], "0")
             self.assertNotIn("GH_TOKEN", options["env"])
             self.assertNotIn("GITHUB_TOKEN", options["env"])
+            if "fetch" in command or "ls-remote" in command:
+                self.assertEqual(options["timeout"], update_formula.GIT_NETWORK_TIMEOUT_SECONDS)
+            else:
+                self.assertIsNone(options["timeout"])
 
     def test_remote_source_tag_rejects_a_non_commit_target(self) -> None:
         tag = "v1.2.3"
@@ -725,6 +730,42 @@ end
                     tag_object,
                     tag_commit,
                 )
+
+    def test_remote_source_tag_network_git_budget_is_documented(self) -> None:
+        self.assertEqual(update_formula.GIT_NETWORK_TIMEOUT_SECONDS, 60)
+
+    def test_remote_source_tag_network_git_timeout_fails_closed(self) -> None:
+        tag = "v1.2.3"
+        tag_object = "b" * 40
+        tag_commit = "a" * 40
+        output = f"{tag_object}\trefs/tags/{tag}\n{tag_commit}\trefs/tags/{tag}^{{}}\n"
+
+        for network_verb in ("fetch", "ls-remote"):
+            with self.subTest(command=network_verb):
+                def git_result(
+                    command: list[str],
+                    verb: str = network_verb,
+                    **kwargs: object,
+                ) -> update_formula.subprocess.CompletedProcess[str]:
+                    if verb in command:
+                        raise update_formula.subprocess.TimeoutExpired(command, timeout=kwargs.get("timeout"))
+                    stdout = ""
+                    if command[-1] == f"refs/tags/{tag}^{{tag}}":
+                        stdout = tag_object + "\n"
+                    elif command[-1] == f"refs/tags/{tag}^{{commit}}":
+                        stdout = tag_commit + "\n"
+                    elif "ls-remote" in command:
+                        stdout = output
+                    return update_formula.subprocess.CompletedProcess(command, 0, stdout, "")
+
+                with mock.patch.object(update_formula.subprocess, "run", side_effect=git_result):
+                    with self.assertRaisesRegex(SystemExit, r"timed out after 60s"):
+                        update_formula.verify_remote_source_tag(
+                            "openclaw/example",
+                            tag,
+                            tag_object,
+                            tag_commit,
+                        )
 
     def test_verified_hash_mode_renders_canonical_targets_without_downloading_assets(self) -> None:
         formula = '''class Example < Formula

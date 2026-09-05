@@ -113,7 +113,8 @@ source ref is the supplied annotated tag object and peeled commit, renders the t
 pairs directly from the supplied hashes, and never downloads release assets to recompute them.
 Partial or mixed legacy/verified input sets fail closed. The source repository remains responsible
 for verifying the public release bytes immediately before dispatch and again after the tap update,
-including its clean downstream Homebrew install proof.
+including its clean downstream Homebrew install proof. Each source-tag `git fetch` and
+`git ls-remote` verification has a 60-second deadline and aborts the update on timeout.
 
 Each successful verified dispatch must create one direct-child provenance commit; an already-current
 formula fails closed instead of reporting a trailerless no-op. The workflow revalidates the exact

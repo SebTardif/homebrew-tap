@@ -26,6 +26,7 @@ import urllib.request
 
 USER_AGENT = "steipete-homebrew-tap-updater"
 DOWNLOAD_TIMEOUT_SECONDS = 30
+GIT_NETWORK_TIMEOUT_SECONDS = 60
 TAP_TOKEN_PATTERN = re.compile(r"[a-z0-9][a-z0-9+@._-]*")
 REPOSITORY_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9_.-]*")
 RELEASE_TAG_PATTERN = re.compile(r"v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?")
@@ -270,15 +271,19 @@ def verify_remote_source_tag(
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
     }
 
-    def git(command: list[str], failure: str) -> str:
-        completed = subprocess.run(
-            command,
-            cwd="/",
-            env=environment,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+    def git(command: list[str], failure: str, *, timeout: float | None = None) -> str:
+        try:
+            completed = subprocess.run(
+                command,
+                cwd="/",
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise SystemExit(f"{failure}: timed out after {GIT_NETWORK_TIMEOUT_SECONDS}s") from error
         if completed.returncode != 0:
             detail = completed.stderr.strip() or failure
             raise SystemExit(f"{failure}: {detail}")
@@ -299,6 +304,7 @@ def verify_remote_source_tag(
                 f"{ref}:{ref}",
             ],
             "failed to fetch live source tag",
+            timeout=GIT_NETWORK_TIMEOUT_SECONDS,
         )
         fetched_tag_object = git(
             ["git", "-C", directory, "rev-parse", "--verify", f"{ref}^{{tag}}"],
@@ -315,6 +321,7 @@ def verify_remote_source_tag(
     output = git(
         ["git", "ls-remote", "--tags", source_url, ref, f"{ref}^{{}}"],
         "failed to read live source tag",
+        timeout=GIT_NETWORK_TIMEOUT_SECONDS,
     )
     validate_source_tag_refs(output, tag, source_tag_object, source_tag_commit)
 

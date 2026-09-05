@@ -292,6 +292,37 @@ class ReconcileFormulaeTest(unittest.TestCase):
         self.assertEqual(summary.skipped, 1)
         self.assertEqual(summary.current, 1)
 
+    def test_invalid_artifact_template_does_not_block_later_formulae(self) -> None:
+        bad = '''class Example < Formula
+  desc "Example"
+  homepage "https://github.com/openclaw/example"
+  version "1.2.3"
+  license "MIT"
+
+  url "https://github.com/openclaw/example/releases/download/v1.2.3/example_v1.2.3_{oops}.tar.gz"
+  sha256 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+end
+'''
+        directory, root = self.make_tap(bad)
+        self.addCleanup(directory.cleanup)
+        bad_path = root / "Formula" / "example.rb"
+        (root / "Formula" / "working.rb").write_text(
+            formula_text().replace("Example", "Working").replace(
+                "openclaw/example", "openclaw/working"
+            ).replace("example", "working")
+        )
+        with self.assertRaises(ValueError):
+            reconcile_formulae.parse_formula(bad_path)
+        summary = reconcile_formulae.reconcile(
+            root,
+            None,
+            False,
+            release_lookup=lambda _: reconcile_formulae.Release("v1.2.3", False, False),
+        )
+        self.assertEqual(summary.scanned, 2)
+        self.assertEqual(summary.skipped, 1)
+        self.assertEqual(summary.current, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

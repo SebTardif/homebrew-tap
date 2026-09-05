@@ -92,7 +92,8 @@ and [gh shim migration to Octopool](https://gitcrawl.sh/gh-shim/).
 `Reconcile Formulae` is the self-healing fallback for formulae. Every three hours
 it derives each source repository from the formula's GitHub `homepage`, compares the formula with that repository's latest
 stable published release, and runs the same updater and checksum-download logic when the release is
-newer. It never downgrades, skips drafts and prereleases, and makes no commit when every formula is
+newer. Invalid formula metadata is reported and skipped so later formulae are still inspected.
+It never downgrades, skips drafts and prereleases, and makes no commit when every formula is
 current. Manual reconciles default to dry-run and can target one formula. The reconciler reads public
 release metadata and pushes with this tap's own `GITHUB_TOKEN`; it needs no cross-repository token or
 other external credential. The dispatch path remains the preferred low-latency path.

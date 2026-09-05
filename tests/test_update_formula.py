@@ -1032,10 +1032,11 @@ end
             os.chdir(root)
             try:
                 with (
-                    mock.patch.object(update_formula, "sha256", return_value="e" * 64),
-                    self.assertRaisesRegex(SystemExit, "failed to update linux_arm64"),
+                    mock.patch.object(update_formula, "sha256", return_value="e" * 64) as hashed,
+                    self.assertRaisesRegex(SystemExit, "unclassified release asset"),
                 ):
                     update_formula.main(arguments)
+                hashed.assert_not_called()
             finally:
                 os.chdir(previous_directory)
             after = path.read_bytes()
@@ -1044,6 +1045,95 @@ end
         self.assertNotIn(b'version "0.44.0"', after)
         self.assertIn(b"example_0.43.0_mystery.tar.gz", after)
         self.assertNotIn(("e" * 64).encode(), after)
+
+    def test_legacy_target_subsets_and_resources_remain_supported(self) -> None:
+        def formula_for(targets: tuple[str, ...]) -> str:
+            lines = [
+                "class Example < Formula",
+                '  desc "Example"',
+                '  homepage "https://github.com/openclaw/example"',
+                '  version "1.2.3"',
+                '  license "MIT"',
+            ]
+            for platform, prefix in (("macos", "darwin"), ("linux", "linux")):
+                selected = [target for target in targets if target.startswith(prefix)]
+                if not selected:
+                    continue
+                lines.append(f"  on_{platform} do")
+                for target in selected:
+                    cpu = "arm" if target.endswith("arm64") else "intel"
+                    lines.extend([
+                        f"    if Hardware::CPU.{cpu}?",
+                        f'      url "https://github.com/openclaw/example/releases/download/v1.2.3/example_1.2.3_{target}.tar.gz"',
+                        f'      sha256 "{"a" * 64}"',
+                        "    end",
+                    ])
+                lines.append("  end")
+            return "\n".join([*lines, "  def install", '    bin.install "example"', "  end", "end", ""])
+
+        inventories = (
+            ("darwin_arm64", "darwin_amd64"),
+            ("darwin_arm64", "darwin_amd64", "linux_amd64"),
+            ("darwin_universal", "linux_arm64", "linux_amd64"),
+            update_formula.RELEASE_TARGETS,
+        )
+        resource = (
+            '  resource "data" do\n'
+            '    url "https://example.org/data.tar.gz"\n'
+            f'    sha256 "{"f" * 64}"\n'
+            '  end\n'
+        )
+        for targets in inventories:
+            with self.subTest(targets=targets), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                (root / "Formula").mkdir()
+                path = root / "Formula/example.rb"
+                nested_resource = "\n".join("  " + line if line else line for line in resource.split("\n"))
+                fixture = formula_for(targets).replace("  def install", resource + "  def install")
+                fixture = fixture.replace("\n  end", "\n" + nested_resource + "  end", 1)
+                path.write_text(fixture)
+                previous = pathlib.Path.cwd()
+                os.chdir(root)
+                try:
+                    with mock.patch.object(update_formula, "sha256", return_value="e" * 64) as hashed:
+                        self.assertEqual(update_formula.main([
+                            "--formula", "example", "--repository", "openclaw/example", "--tag", "v1.2.4",
+                        ]), 0)
+                    self.assertEqual(hashed.call_count, len(targets))
+                finally:
+                    os.chdir(previous)
+                updated = path.read_text()
+                self.assertIn(resource, updated)
+                self.assertIn(nested_resource, updated)
+                self.assertEqual(updated.count('sha256 "' + "e" * 64), len(targets))
+                self.assertNotIn("example_1.2.3_", updated)
+
+    def test_legacy_explicit_source_archive_is_handled_but_unknown_pair_is_not(self) -> None:
+        archive = "https://github.com/openclaw/example/archive/refs/tags/v0.44.0.tar.gz"
+        pair = f'  url "{archive}"\n  sha256 "{"f" * 64}"\n'
+        for count in (1, 2):
+            with self.subTest(archives=count), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                (root / "Formula").mkdir()
+                path = root / "Formula/example.rb"
+                original = platform_install_formula().replace("  on_macos do", pair * count + "  on_macos do")
+                path.write_text(original)
+                previous = pathlib.Path.cwd()
+                os.chdir(root)
+                try:
+                    with mock.patch.object(update_formula, "sha256", return_value="e" * 64) as hashed:
+                        arguments = ["--formula", "example", "--repository", "openclaw/example",
+                                     "--tag", "v0.44.0", "--linux-url", archive]
+                        if count == 1:
+                            self.assertEqual(update_formula.main(arguments), 0)
+                            self.assertEqual(hashed.call_count, 5)
+                        else:
+                            with self.assertRaisesRegex(SystemExit, "at most one source archive"):
+                                update_formula.main(arguments)
+                            hashed.assert_not_called()
+                            self.assertEqual(path.read_text(), original)
+                finally:
+                    os.chdir(previous)
 
     def test_rejects_different_architecture_urls_in_one_stanza(self) -> None:
         text = '''class Example < Formula

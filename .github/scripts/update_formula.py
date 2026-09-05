@@ -413,6 +413,18 @@ def iter_url_sha_pairs(text: str) -> list[re.Match[str]]:
     )
 
 
+def iter_primary_url_sha_pairs(text: str) -> list[re.Match[str]]:
+    resources = list(re.finditer(
+        r'^(?P<indent>[ \t]+)resource [^\n]+\n.*?^(?P=indent)end(?:[ \t]*\n|$)',
+        text,
+        re.MULTILINE | re.DOTALL,
+    ))
+    return [
+        pair for pair in iter_url_sha_pairs(text)
+        if not any(resource.start() <= pair.start() < resource.end() for resource in resources)
+    ]
+
+
 def stanza_body(text: str, stanza: str) -> str | None:
     match = re.search(
         rf'^\s*{stanza}\s+do\s*$\n(?P<body>.*?)(?=^\s*(?:on_macos\s+do|on_linux\s+do|resource\s+|head |def |test do))',
@@ -1288,7 +1300,7 @@ def main(argv: list[str] | None = None) -> int:
     text = update_version(text, version)
     has_macos = has_stanza(text, "on_macos")
     has_linux = has_stanza(text, "on_linux")
-    url_sha_pairs = iter_url_sha_pairs(text)
+    url_sha_pairs = iter_primary_url_sha_pairs(text)
     classified_pairs = [(match, classify_target(match.group("url"), target_aliases, version)) for match in url_sha_pairs]
     target_url_count = sum(1 for _, target in classified_pairs if target)
     has_target_urls = target_url_count > 1 and not uses_stanza_url_mode(text, version)
@@ -1302,7 +1314,7 @@ def main(argv: list[str] | None = None) -> int:
             args.artifact_template,
             target_aliases,
         )
-        url_sha_pairs = iter_url_sha_pairs(text)
+        url_sha_pairs = iter_primary_url_sha_pairs(text)
         classified_pairs = [(match, classify_target(match.group("url"), target_aliases, version)) for match in url_sha_pairs]
         target_url_count = sum(1 for _, target in classified_pairs if target)
         has_target_urls = target_url_count > 1
@@ -1316,7 +1328,7 @@ def main(argv: list[str] | None = None) -> int:
             args.artifact_template,
             target_aliases,
         )
-        url_sha_pairs = iter_url_sha_pairs(text)
+        url_sha_pairs = iter_primary_url_sha_pairs(text)
         classified_pairs = [(match, classify_target(match.group("url"), target_aliases, version)) for match in url_sha_pairs]
         target_url_count = sum(1 for _, target in classified_pairs if target)
         has_target_urls = target_url_count > 1
@@ -1324,9 +1336,25 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("formulae with only one platform stanza need manual updates")
 
     if has_target_urls:
+        archives = [
+            match for match, _ in classified_pairs
+            if re.fullmatch(r'https://github\.com/[^"\n]+/archive/refs/tags/[^"\n]+', match.group("url"))
+        ]
+        if args.linux_url and len(archives) > 1:
+            raise SystemExit("expected at most one source archive URL/checksum pair")
+        for match, target in classified_pairs:
+            if target or (args.linux_url and match in archives):
+                continue
+            raise SystemExit(
+                f"unclassified release asset in {path}: {match.group('url')}; "
+                "supply --target-aliases for custom target names"
+            )
+        if target_url_count >= len(RELEASE_TARGETS):
+            missing = set(RELEASE_TARGETS) - {target for _, target in classified_pairs}
+            if missing:
+                raise SystemExit(f"failed to update {sorted(missing)[0]} in {path}")
         template = args.artifact_template or "{formula}_{version}_{target}.tar.gz"
         replacements: list[tuple[int, int, str]] = []
-        seen_targets: set[str] = set()
         for match, target in classified_pairs:
             if not target:
                 continue
@@ -1348,13 +1376,7 @@ def main(argv: list[str] | None = None) -> int:
                 f'{match.group("middle")}{digest}{match.group("suffix")}'
             )
             replacements.append((match.start(), match.end(), replacement))
-            seen_targets.add(target)
             print(f"{target}: {digest}  {url}")
-        if seen_targets != set(RELEASE_TARGETS):
-            missing = set(RELEASE_TARGETS) - seen_targets
-            unexpected = seen_targets - set(RELEASE_TARGETS)
-            target = sorted(missing or unexpected)[0]
-            raise SystemExit(f"failed to update {target} in {path}")
         for start, end, replacement in reversed(replacements):
             text = text[:start] + replacement + text[end:]
 

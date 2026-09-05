@@ -1296,13 +1296,14 @@ def main(argv: list[str] | None = None) -> int:
     validate_url(linux_url, "Linux URL")
 
     path = tap_path("Formula", args.formula)
-    if not path.exists():
+    created = False
+    if path.exists():
+        text = path.read_text()
+    else:
         template = args.artifact_template or "{formula}_{version}_{target}.tar.gz"
         description = args.description or f"{args.formula} command-line tool"
-        path.write_text(seed_formula(args.formula, args.repository, version, description, template))
-        print(f"created {path}")
-
-    text = path.read_text()
+        text = seed_formula(args.formula, args.repository, version, description, template)
+        created = True
     text = update_repository_metadata(text, args.repository)
     text = update_version(text, version)
     has_macos = has_stanza(text, "on_macos")
@@ -1410,7 +1411,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Linux: {linux_sha}  {linux_url}")
 
     path.write_text(text)
-
+    if created:
+        print(f"created {path}")
     print(f"updated {path} to {version}")
     if args.cask:
         assert cask_artifact is not None

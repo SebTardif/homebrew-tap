@@ -86,7 +86,9 @@ caller-supplied hashes without public downloads cannot update that formula. Its 
 
 Existing `Formula/*.rb` files own each tool's caveats and install instructions. The updater
 preserves that content while changing release metadata, so maintain it here rather than in an
-upstream release workflow. For Gitcrawl, see the [configuration reference](https://gitcrawl.sh/configuration/)
+upstream release workflow. Newly generated formulae remain in memory until all required
+checksum downloads and rendering succeed, so failed creation leaves no placeholder file.
+For Gitcrawl, see the [configuration reference](https://gitcrawl.sh/configuration/)
 and [gh shim migration to Octopool](https://gitcrawl.sh/gh-shim/).
 
 `Reconcile Formulae` is the self-healing fallback for formulae. Every three hours

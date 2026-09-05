@@ -975,6 +975,69 @@ end
 
         self.assertIn(r'desc "A \"quoted\" \#{system(\"id\")} description"', seeded)
 
+    def test_seeded_formula_is_not_written_when_checksum_download_fails(self) -> None:
+        arguments = [
+            "--formula", "example",
+            "--tag", "v1.2.3",
+            "--repository", "openclaw/example",
+            "--artifact-template", "{formula}_{version}_{target}.tar.gz",
+        ]
+        for when in ("first-target", "later-target"):
+            with self.subTest(when=when), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                (root / "Formula").mkdir()
+                path = root / "Formula" / "example.rb"
+                seen = {"n": 0}
+
+                def download(url: str) -> str:
+                    self.assertFalse(path.exists())
+                    seen["n"] += 1
+                    if when == "first-target" or seen["n"] > 1:
+                        raise SystemExit("download failed")
+                    return "e" * 64
+
+                previous_directory = pathlib.Path.cwd()
+                os.chdir(root)
+                try:
+                    with mock.patch.object(update_formula, "sha256", side_effect=download):
+                        with self.assertRaisesRegex(SystemExit, "download failed"):
+                            update_formula.main(arguments)
+                finally:
+                    os.chdir(previous_directory)
+                self.assertFalse(path.exists())
+                self.assertEqual(list(root.rglob("*.rb")), [])
+
+    def test_seeded_formula_is_written_only_after_checksums_succeed(self) -> None:
+        arguments = [
+            "--formula", "example",
+            "--tag", "v1.2.3",
+            "--repository", "openclaw/example",
+            "--artifact-template", "{formula}_{version}_{target}.tar.gz",
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "Formula").mkdir()
+            path = root / "Formula" / "example.rb"
+
+            def download(url: str) -> str:
+                self.assertFalse(path.exists())
+                return hashlib.sha256(url.encode()).hexdigest()
+
+            previous_directory = pathlib.Path.cwd()
+            os.chdir(root)
+            try:
+                with mock.patch.object(update_formula, "sha256", side_effect=download) as hashed:
+                    self.assertEqual(update_formula.main(arguments), 0)
+                self.assertEqual(hashed.call_count, 4)
+            finally:
+                os.chdir(previous_directory)
+            updated = path.read_text()
+
+        self.assertNotIn("0" * 64, updated)
+        self.assertEqual(updated.count("sha256 "), 4)
+        for target in update_formula.RELEASE_TARGETS:
+            self.assertIn(f"example_#{{version}}_{target}.tar.gz", updated)
+
     def test_updates_duplicate_source_url_checksums_in_stanza(self) -> None:
         text = '''class Camsnap < Formula
   version "0.2.0"

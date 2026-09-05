@@ -233,7 +233,7 @@ import sys
 import urllib.error
 from unittest import mock
 sys.argv = sys.argv[1:]
-def download(request):
+def download(request, **_kwargs):
     url = request.full_url
     targets = ("darwin_amd64", "darwin_arm64", "linux_amd64", "linux_arm64")
     urls = {f"https://github.com/openclaw/crabbox/releases/download/v1.2.3/crabbox_1.2.3_{t}.tar.gz": t for t in targets}

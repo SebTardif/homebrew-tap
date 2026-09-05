@@ -169,7 +169,7 @@ class UpdateFormulaTest(unittest.TestCase):
                     for current in (False, True):
                         before = path.read_bytes()
 
-                        def download(request):
+                        def download(request, **_kwargs):
                             self.assertEqual(path.read_bytes(), before)
                             return io.BytesIO(urls[request.full_url])
 
@@ -208,7 +208,7 @@ class UpdateFormulaTest(unittest.TestCase):
                             "--assets-json", json.dumps(assets), "--cask", "example", "--cask-artifact", "example.zip",
                         ]
 
-                        def download(request):
+                        def download(request, **_kwargs):
                             self.assertEqual({p.relative_to(root): p.read_bytes() for p in root.rglob("*.rb")}, before)
                             target = next(t for t, item in assets.items() if request.full_url.endswith(item["name"]))
                             if target == "linux_arm64":
@@ -241,7 +241,7 @@ class UpdateFormulaTest(unittest.TestCase):
             (root / "Formula").mkdir()
             path = root / "Formula" / "crabbox.rb"
 
-            def download(request):
+            def download(request, **_kwargs):
                 self.assertFalse(path.exists())
                 target = next(t for t, item in crabbox_assets().items() if request.full_url.endswith(item["name"]))
                 return io.BytesIO(target.encode())
@@ -1172,6 +1172,75 @@ end
         self.assertIn('version "0.27.0"', updated)
         self.assertIn('sha256 "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"', updated)
         self.assertIn("CodexBar-macos-universal-#{version}.zip", updated)
+
+    def test_sha256_download_budget_is_documented(self) -> None:
+        self.assertEqual(update_formula.DOWNLOAD_TIMEOUT_SECONDS, 30)
+        self.assertEqual(update_formula.DOWNLOAD_MAX_BYTES, 256 * 1024 * 1024)
+
+    def test_sha256_passes_timeout_and_hashes_a_bounded_body(self) -> None:
+        payload = b"formula-asset"
+        url = "https://github.com/openclaw/example/releases/download/v1.0.0/example.tar.gz"
+        with mock.patch.object(
+            update_formula.urllib.request,
+            "urlopen",
+            return_value=io.BytesIO(payload),
+        ) as network:
+            digest = update_formula.sha256(url)
+        self.assertEqual(digest, hashlib.sha256(payload).hexdigest())
+        network.assert_called_once()
+        self.assertEqual(network.call_args.args[0].full_url, url)
+        self.assertEqual(network.call_args.kwargs["timeout"], update_formula.DOWNLOAD_TIMEOUT_SECONDS)
+
+    def test_sha256_rejects_bodies_over_the_documented_cap(self) -> None:
+        url = "https://github.com/openclaw/example/releases/download/v1.0.0/example.tar.gz"
+        with (
+            mock.patch.object(update_formula, "DOWNLOAD_MAX_BYTES", 16),
+            mock.patch.object(
+                update_formula.urllib.request,
+                "urlopen",
+                return_value=io.BytesIO(b"x" * 17),
+            ),
+            self.assertRaisesRegex(SystemExit, r"exceeded the 16-byte cap"),
+        ):
+            update_formula.sha256(url)
+
+    def test_sha256_hashes_a_body_at_the_documented_cap(self) -> None:
+        payload = b"x" * 16
+        url = "https://github.com/openclaw/example/releases/download/v1.0.0/example.tar.gz"
+        with (
+            mock.patch.object(update_formula, "DOWNLOAD_MAX_BYTES", 16),
+            mock.patch.object(
+                update_formula.urllib.request,
+                "urlopen",
+                return_value=io.BytesIO(payload),
+            ),
+        ):
+            digest = update_formula.sha256(url)
+        self.assertEqual(digest, hashlib.sha256(payload).hexdigest())
+
+    def test_sha256_timeout_fails_closed(self) -> None:
+        url = "https://github.com/openclaw/example/releases/download/v1.0.0/example.tar.gz"
+        with (
+            mock.patch.object(
+                update_formula.urllib.request,
+                "urlopen",
+                side_effect=TimeoutError("timed out"),
+            ),
+            self.assertRaisesRegex(SystemExit, r"timed out downloading .* after 30s"),
+        ):
+            update_formula.sha256(url)
+
+    def test_sha256_urlerror_timeout_fails_closed(self) -> None:
+        url = "https://github.com/openclaw/example/releases/download/v1.0.0/example.tar.gz"
+        with (
+            mock.patch.object(
+                update_formula.urllib.request,
+                "urlopen",
+                side_effect=urllib.error.URLError(TimeoutError("timed out")),
+            ),
+            self.assertRaisesRegex(SystemExit, r"timed out downloading .* after 30s"),
+        ):
+            update_formula.sha256(url)
 
 
 if __name__ == "__main__":

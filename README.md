@@ -103,7 +103,9 @@ Ruby syntax.
 
 Fleet release workflows use the optional `assets` JSON contract: exactly one `name` and `sha256`
 for each Darwin/Linux amd64/arm64 target. The updater renders those names and hashes verbatim,
-downloads all four public release assets, and refuses to commit on any digest mismatch. Omitting
+downloads all four public release assets, and refuses to commit on any digest mismatch. Legacy
+multi-target updates preserve smaller target inventories and resources, but reject unrecognized
+primary release assets before downloading or writing. Custom target names need `target_aliases`. Omitting
 `assets` preserves the legacy template and filename-guessing behavior for older callers.
 
 Other four-target binary releases can use the workflow's `verified-hashes-v1` contract. Supply all four

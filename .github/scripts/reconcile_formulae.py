@@ -219,19 +219,24 @@ def parse_formula(path: pathlib.Path) -> FormulaInfo:
         raise ValueError(f"formula version {explicit_version!r} does not match release tag {current_tag!r}")
     version_text = explicit_version or current_tag.removeprefix("v")
 
+    try:
+        update_options = infer_update_options(
+            text,
+            repository,
+            path.stem,
+            current_tag,
+            version_text,
+        )
+    except SystemExit as error:
+        raise ValueError(str(error)) from error
+
     return FormulaInfo(
         name=path.stem,
         path=path,
         repository=repository,
         current_tag=current_tag,
         current_version=parse_semver(version_text),
-        update_options=infer_update_options(
-            text,
-            repository,
-            path.stem,
-            current_tag,
-            version_text,
-        ),
+        update_options=update_options,
     )
 
 

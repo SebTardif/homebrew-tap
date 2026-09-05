@@ -1350,9 +1350,11 @@ def main(argv: list[str] | None = None) -> int:
             replacements.append((match.start(), match.end(), replacement))
             seen_targets.add(target)
             print(f"{target}: {digest}  {url}")
-        for target in sorted(set(RELEASE_TARGETS).intersection(seen_targets ^ set(RELEASE_TARGETS))):
-            if target_url_count >= 4:
-                raise SystemExit(f"failed to update {target} in {path}")
+        if seen_targets != set(RELEASE_TARGETS):
+            missing = set(RELEASE_TARGETS) - seen_targets
+            unexpected = seen_targets - set(RELEASE_TARGETS)
+            target = sorted(missing or unexpected)[0]
+            raise SystemExit(f"failed to update {target} in {path}")
         for start, end, replacement in reversed(replacements):
             text = text[:start] + replacement + text[end:]
 

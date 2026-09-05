@@ -999,6 +999,52 @@ end
         self.assertEqual(updated.count('sha256 "' + "e" * 64 + '"'), 4)
         self.assertNotIn('""', updated)
 
+    def test_multi_target_update_rejects_unclassified_pair_without_writing(self) -> None:
+        mystery_url = (
+            "https://github.com/openclaw/example/releases/download/v0.43.0/"
+            "example_0.43.0_mystery.tar.gz"
+        )
+        self.assertIsNone(update_formula.classify_target(mystery_url, {}, "0.43.0"))
+        formula = platform_install_formula().replace(
+            '  license "MIT"',
+            '  version "0.43.0"\n  license "MIT"',
+        ).replace("example_0.43.0_linux_arm64.tar.gz", "example_0.43.0_mystery.tar.gz")
+        classified = [
+            update_formula.classify_target(match.group("url"), {}, "0.43.0")
+            for match in update_formula.iter_url_sha_pairs(formula)
+        ]
+        self.assertEqual(classified.count(None), 1)
+        self.assertEqual(len([target for target in classified if target]), 3)
+        arguments = [
+            "--formula", "example",
+            "--tag", "v0.44.0",
+            "--repository", "openclaw/example",
+            "--artifact-template", "{formula}_{version}_{target}.tar.gz",
+        ]
+
+        previous_directory = pathlib.Path.cwd()
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "Formula").mkdir()
+            path = root / "Formula" / "example.rb"
+            path.write_text(formula)
+            before = path.read_bytes()
+            os.chdir(root)
+            try:
+                with (
+                    mock.patch.object(update_formula, "sha256", return_value="e" * 64),
+                    self.assertRaisesRegex(SystemExit, "failed to update linux_arm64"),
+                ):
+                    update_formula.main(arguments)
+            finally:
+                os.chdir(previous_directory)
+            after = path.read_bytes()
+
+        self.assertEqual(after, before)
+        self.assertNotIn(b'version "0.44.0"', after)
+        self.assertIn(b"example_0.43.0_mystery.tar.gz", after)
+        self.assertNotIn(("e" * 64).encode(), after)
+
     def test_rejects_different_architecture_urls_in_one_stanza(self) -> None:
         text = '''class Example < Formula
   version "1.0.0"

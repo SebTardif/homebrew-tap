@@ -19,11 +19,13 @@ import string
 import subprocess
 import sys
 import tempfile
+import urllib.error
 import urllib.parse
 import urllib.request
 
 
 USER_AGENT = "steipete-homebrew-tap-updater"
+DOWNLOAD_TIMEOUT_SECONDS = 30
 TAP_TOKEN_PATTERN = re.compile(r"[a-z0-9][a-z0-9+@._-]*")
 REPOSITORY_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9_.-]*")
 RELEASE_TAG_PATTERN = re.compile(r"v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?")
@@ -185,9 +187,16 @@ def sha256(url: str) -> str:
     validate_url(url, "download URL")
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     digest = hashlib.sha256()
-    with urllib.request.urlopen(request) as response:
-        while chunk := response.read(1024 * 1024):
-            digest.update(chunk)
+    try:
+        with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
+            while chunk := response.read(1024 * 1024):
+                digest.update(chunk)
+    except TimeoutError as error:
+        raise SystemExit(f"timed out downloading {url} after {DOWNLOAD_TIMEOUT_SECONDS}s") from error
+    except urllib.error.URLError as error:
+        if isinstance(error.reason, TimeoutError):
+            raise SystemExit(f"timed out downloading {url} after {DOWNLOAD_TIMEOUT_SECONDS}s") from error
+        raise
     return digest.hexdigest()
 
 

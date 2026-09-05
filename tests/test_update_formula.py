@@ -1175,9 +1175,8 @@ end
 
     def test_sha256_download_budget_is_documented(self) -> None:
         self.assertEqual(update_formula.DOWNLOAD_TIMEOUT_SECONDS, 30)
-        self.assertEqual(update_formula.DOWNLOAD_MAX_BYTES, 256 * 1024 * 1024)
 
-    def test_sha256_passes_timeout_and_hashes_a_bounded_body(self) -> None:
+    def test_sha256_passes_timeout_and_hashes_the_body(self) -> None:
         payload = b"formula-asset"
         url = "https://github.com/openclaw/example/releases/download/v1.0.0/example.tar.gz"
         with mock.patch.object(
@@ -1190,33 +1189,6 @@ end
         network.assert_called_once()
         self.assertEqual(network.call_args.args[0].full_url, url)
         self.assertEqual(network.call_args.kwargs["timeout"], update_formula.DOWNLOAD_TIMEOUT_SECONDS)
-
-    def test_sha256_rejects_bodies_over_the_documented_cap(self) -> None:
-        url = "https://github.com/openclaw/example/releases/download/v1.0.0/example.tar.gz"
-        with (
-            mock.patch.object(update_formula, "DOWNLOAD_MAX_BYTES", 16),
-            mock.patch.object(
-                update_formula.urllib.request,
-                "urlopen",
-                return_value=io.BytesIO(b"x" * 17),
-            ),
-            self.assertRaisesRegex(SystemExit, r"exceeded the 16-byte cap"),
-        ):
-            update_formula.sha256(url)
-
-    def test_sha256_hashes_a_body_at_the_documented_cap(self) -> None:
-        payload = b"x" * 16
-        url = "https://github.com/openclaw/example/releases/download/v1.0.0/example.tar.gz"
-        with (
-            mock.patch.object(update_formula, "DOWNLOAD_MAX_BYTES", 16),
-            mock.patch.object(
-                update_formula.urllib.request,
-                "urlopen",
-                return_value=io.BytesIO(payload),
-            ),
-        ):
-            digest = update_formula.sha256(url)
-        self.assertEqual(digest, hashlib.sha256(payload).hexdigest())
 
     def test_sha256_timeout_fails_closed(self) -> None:
         url = "https://github.com/openclaw/example/releases/download/v1.0.0/example.tar.gz"

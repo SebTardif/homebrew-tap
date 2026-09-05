@@ -26,7 +26,6 @@ import urllib.request
 
 USER_AGENT = "steipete-homebrew-tap-updater"
 DOWNLOAD_TIMEOUT_SECONDS = 30
-DOWNLOAD_MAX_BYTES = 256 * 1024 * 1024
 TAP_TOKEN_PATTERN = re.compile(r"[a-z0-9][a-z0-9+@._-]*")
 REPOSITORY_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9_.-]*")
 RELEASE_TAG_PATTERN = re.compile(r"v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?")
@@ -188,13 +187,9 @@ def sha256(url: str) -> str:
     validate_url(url, "download URL")
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     digest = hashlib.sha256()
-    total = 0
     try:
         with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
             while chunk := response.read(1024 * 1024):
-                total += len(chunk)
-                if total > DOWNLOAD_MAX_BYTES:
-                    raise SystemExit(f"download of {url} exceeded the {DOWNLOAD_MAX_BYTES}-byte cap")
                 digest.update(chunk)
     except TimeoutError as error:
         raise SystemExit(f"timed out downloading {url} after {DOWNLOAD_TIMEOUT_SECONDS}s") from error

@@ -65,7 +65,9 @@ brew uninstall --cask --zap openclaw/tap/<name>
 Formula updates have two automated paths. Source-repository release workflows dispatch
 `Update Formula` for immediate updates. That workflow accepts a Homebrew formula token, a semantic release tag, and a
 GitHub repository in `owner/repo` form. Optional artifact inputs must resolve to HTTPS release
-assets and may use only the placeholders documented by the workflow.
+assets and may use only the placeholders documented by the workflow. Downloads use a 30-second
+socket inactivity timeout and stream archive bytes without imposing a size limit. This timeout
+bounds stalled socket operations, not the total duration of a progressing download.
 
 **Crabbox uses the ordinary four-target `assets` handoff after publication.** The
 [Crabbox release process](https://github.com/openclaw/crabbox/blob/main/docs/RELEASING.md)
